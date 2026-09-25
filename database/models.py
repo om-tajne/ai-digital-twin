@@ -708,40 +708,7 @@ class StudentRevisionSettings(Base):
     )
 
 
-# ============================================================
-# VIVA MODELS
-# ============================================================
 
-class VivaSession(Base):
-    __tablename__ = "viva_sessions"
-
-    session_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    student_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"), nullable=False)
-    topic = Column(String(255), nullable=True)
-    status = Column(String(50), default="active")
-    started_at = Column(DateTime(timezone=True), server_default=func.now())
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    average_score = Column(Float, nullable=True)
-    performance_label = Column(String(100), nullable=True)
-    summary_feedback = Column(Text, nullable=True)
-
-    student = relationship("Student")
-    exchanges = relationship("VivaExchange", back_populates="session", cascade="all, delete-orphan")
-
-class VivaExchange(Base):
-    __tablename__ = "viva_exchanges"
-
-    exchange_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("viva_sessions.session_id", ondelete="CASCADE"), nullable=False)
-    question_number = Column(Integer, nullable=False)
-    question = Column(Text, nullable=False)
-    answer = Column(Text, nullable=True)
-    topic = Column(String(255), nullable=True)
-    score = Column(Float, nullable=True)
-    feedback = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
-
-    session = relationship("VivaSession", back_populates="exchanges")
 
 # ============================================================
 # PAYMENT MODEL
