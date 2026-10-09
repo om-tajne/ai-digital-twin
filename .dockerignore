@@ -1,0 +1,5 @@
+fastapi-backend/venv/
+fastapi-backend/__pycache__/
+node-backend/node_modules/
+frontend/node_modules/
+.git/
