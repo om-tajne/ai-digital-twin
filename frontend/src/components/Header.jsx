@@ -1,187 +1,120 @@
-import { useContext } from "react";
-import { Link } from "react-router-dom";
+import { useContext, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import "./Header.css";
 
 const Header = () => {
   const { user, logout } = useContext(AuthContext);
+  const location = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const navLinks = [
+    { path: "/", label: "Home", icon: "bi-house-door" },
+    { path: "/library", label: "Library", icon: "bi-book" },
+    { path: "/test", label: "Test Practice", icon: "bi-pencil-square" },
+    { path: "/dashboard", label: "Top Struggles", icon: "bi-bar-chart-line" },
+    { path: "/study-planner", label: "Study Planner", icon: "bi-calendar-check" },
+    { path: "/payment", label: "Pro Plan", icon: "bi-credit-card" },
+    { path: "/parents-dashboard", label: "Parents Dashboard", icon: "bi-people" },
+    { path: "/student-profile", label: "Student Profile", icon: "bi-person-circle" },
+  ];
 
   return (
-    <header
-      className="p-3"
-      style={{ backgroundColor: "#0F172A" }}
-    >
-      <div className="container-fluid px-5">
-        <div className="d-flex align-items-center justify-content-between">
-
-          {/* Logo */}
-          <Link
-            to="/"
-            className="d-flex align-items-center text-white text-decoration-none"
-          >
-            <h3 className="m-0 fw-bold">
-              AI Digital Twin
-            </h3>
+    <header className="header-navbar sticky-top">
+      <div className="container-fluid px-3 px-lg-4">
+        <div className="d-flex align-items-center justify-content-between py-2">
+          
+          {/* Brand Logo */}
+          <Link to="/" className="d-flex align-items-center text-decoration-none me-3">
+            <span className="brand-icon me-2">
+              <i className="bi bi-cpu-fill"></i>
+            </span>
+            <span className="brand-text fw-bold">AI Digital Twin</span>
           </Link>
 
-          {/* Navigation */}
-          <ul
-            className="nav justify-content-center"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(5, auto)",
-              gap: "4px 8px",
-              alignItems: "center",
-            }}
+          {/* Mobile Toggler Button */}
+          <button
+            className="mobile-toggle-btn d-lg-none"
+            type="button"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            aria-label="Toggle navigation"
           >
+            <i className={`bi ${isMobileMenuOpen ? "bi-x-lg" : "bi-list"}`}></i>
+          </button>
 
-            {/* Home */}
-            <li>
-              <Link
-                to="/"
-                className="nav-link nav-item-custom"
-              >
-                <i className="bi bi-house-door me-1"></i>
-                Home
-              </Link>
-            </li>
+          {/* Collapsible Navigation Container */}
+          <div className={`nav-collapse-container ${isMobileMenuOpen ? "show" : ""}`}>
+            
+            {/* Main Navigation Links */}
+            <nav className="mx-auto">
+              <ul className="header-nav-list">
+                {navLinks.map((link) => {
+                  const isActive = location.pathname === link.path;
+                  return (
+                    <li key={link.path}>
+                      <Link
+                        to={link.path}
+                        className={`nav-item-custom ${isActive ? "active" : ""}`}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                      >
+                        <i className={`bi ${link.icon} nav-icon`}></i>
+                        <span>{link.label}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
 
-            {/* Library */}
-            <li>
-              <Link
-                to="/library"
-                className="nav-link nav-item-custom"
-              >
-                <i className="bi bi-book me-1"></i>
-                Library
-              </Link>
-            </li>
+            {/* Right Action Controls: Search & Auth */}
+            <div className="header-right-actions">
+              
+              {/* Search Bar */}
+              <form className="header-search-form" onSubmit={(e) => e.preventDefault()}>
+                <div className="search-input-wrapper">
+                  <i className="bi bi-search search-icon"></i>
+                  <input
+                    type="search"
+                    className="form-control header-search-input"
+                    placeholder="Search..."
+                  />
+                </div>
+              </form>
 
-            {/* Test Practice */}
-            <li>
-              <Link
-                to="/test"
-                className="nav-link nav-item-custom"
-              >
-                <i className="bi bi-pencil-square me-1"></i>
-                Test Practice
-              </Link>
-            </li>
-
-            {/* Top Struggles */}
-            <li>
-              <Link
-                to="/dashboard"
-                className="nav-link nav-item-custom"
-              >
-                <i className="bi bi-bar-chart-line me-1"></i>
-                Top Struggles
-              </Link>
-            </li>
-
-            {/* Study Planner */}
-            <li>
-              <Link
-                to="/study-planner"
-                className="nav-link nav-item-custom"
-              >
-                <i className="bi bi-calendar-check me-1"></i>
-                Study Planner
-              </Link>
-            </li>
-
-            {/* Pro Plan / Payment */}
-<li>
-  <Link
-    to="/payment"
-    className="nav-link nav-item-custom"
-  >
-    <i className="bi bi-credit-card me-1"></i>
-    Pro Plan
-  </Link>
-</li>
-
-            {/* Student Profile */}
-            <li>
-              <Link
-                to="/student-profile"
-                className="nav-link nav-item-custom"
-              >
-                <i className="bi bi-person-circle me-1"></i>
-                Student Profile
-              </Link>
-            </li>
-
-            {/* Parents Dashboard */}
-            <li>
-              <Link
-                to="/parents-dashboard"
-                className="nav-link nav-item-custom"
-              >
-                <i className="bi bi-people me-1"></i>
-                Parents Dashboard
-              </Link>
-            </li>
-
-          </ul>
-
-          {/* Search */}
-          <form className="d-flex me-3">
-            <input
-              type="search"
-              className="form-control"
-              placeholder="Search..."
-            />
-          </form>
-
-          {/* Authentication */}
-          {!user ? (
-            <div>
-              <Link to="/login">
-                <button className="btn btn-outline-light me-2">
-                  Login
-                </button>
-              </Link>
-
-              <Link to="/signup">
-                <button className="btn btn-outline-light">
-                  Sign Up
-                </button>
-              </Link>
-            </div>
-          ) : (
-            <div className="d-flex align-items-center">
-
-              {/* Avatar */}
-              <div
-                className="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-2"
-                style={{
-                  width: "40px",
-                  height: "40px",
-                  fontWeight: "bold",
-                }}
-              >
-                {user.full_name
-                  ? user.full_name.charAt(0).toUpperCase()
-                  : "U"}
-              </div>
-
-              {/* Name */}
-              <span className="text-white me-3">
-                {user.full_name || "User"}
-              </span>
-
-              {/* Logout */}
-              <button
-                type="button"
-                className="btn btn-outline-light"
-                onClick={logout}
-              >
-                Logout
-              </button>
+              {/* User Authentication Actions */}
+              {!user ? (
+                <div className="auth-buttons-group">
+                  <Link to="/login" onClick={() => setIsMobileMenuOpen(false)}>
+                    <button className="btn btn-outline-custom">Login</button>
+                  </Link>
+                  <Link to="/signup" onClick={() => setIsMobileMenuOpen(false)}>
+                    <button className="btn btn-primary-custom">Sign Up</button>
+                  </Link>
+                </div>
+              ) : (
+                <div className="user-profile-group">
+                  <div className="user-avatar-badge me-2">
+                    {user.full_name ? user.full_name.charAt(0).toUpperCase() : "U"}
+                  </div>
+                  <span className="user-name-text me-3 d-none d-xl-inline">
+                    {user.full_name || "User"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-outline-custom btn-sm"
+                    onClick={() => {
+                      logout();
+                      setIsMobileMenuOpen(false);
+                    }}
+                  >
+                    Logout
+                  </button>
+                </div>
+              )}
 
             </div>
-          )}
+
+          </div>
 
         </div>
       </div>

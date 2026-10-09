@@ -1,33 +1,285 @@
 
+/* Base Header Navigation Bar */
+.header-navbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  z-index: 1030;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background-color 0.3s ease;
+}
+
+/* Brand Logo */
+.brand-icon {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 1.2rem;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+}
+
+.brand-text {
+  color: #ffffff;
+  font-size: 1.25rem;
+  letter-spacing: -0.3px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Mobile Toggle Button */
+.mobile-toggle-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-size: 1.4rem;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mobile-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Collapsible Navigation Container */
+.nav-collapse-container {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  justify-content: space-between;
+}
+
+/* Main Navigation List */
+.header-nav-list {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 4px;
+}
+
 .nav-item-custom {
-  color: white !important;
-  padding: 10px 18px !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  padding: 8px 12px !important;
   border-radius: 8px;
   font-weight: 500;
-  transition: all 0.3s ease;
+  font-size: 0.88rem;
+  text-decoration: none !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: all 0.2s ease-in-out;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 .nav-item-custom:hover {
-  background: white;
-  color: #000 !important;
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff !important;
 }
 
-.login-btn .signup-btn{
-  border-radius: 8px;
+.nav-item-custom.active {
+  background: rgba(59, 130, 246, 0.3);
+  color: #93c5fd !important;
+  font-weight: 600;
+  border: 1px solid rgba(147, 197, 253, 0.3);
+}
+
+.nav-icon {
+  font-size: 1rem;
+  opacity: 0.9;
+}
+
+.nav-item-custom:hover .nav-icon,
+.nav-item-custom.active .nav-icon {
+  opacity: 1;
+}
+
+/* Right Action Section */
+.header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Search Input */
+.header-search-form {
+  position: relative;
+}
+
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.header-search-input {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+  border-radius: 20px !important;
+  padding-left: 34px !important;
+  padding-right: 14px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  font-size: 0.85rem !important;
+  width: 160px;
   transition: all 0.3s ease;
+  backdrop-filter: blur(4px);
 }
 
-.login-btn:hover .signup-btn:hover{
-  background: white !important;
-  color: #312E81 !important;
-  border-color: white !important;
+.header-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.55) !important;
 }
 
-.form-control {
+.header-search-input:focus {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.35) !important;
+  width: 200px;
+}
+
+/* Auth Buttons */
+.auth-buttons-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-outline-custom {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
   border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
 }
 
-.form-control:focus {
-  box-shadow: 0 0 10px rgba(255,255,255,0.25);
-  border-color: white;
+.btn-outline-custom:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+.btn-primary-custom {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border: none;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.4);
+}
+
+.btn-primary-custom:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.6);
+  color: #ffffff;
+}
+
+/* User Profile Badge */
+.user-profile-group {
+  display: flex;
+  align-items: center;
+}
+
+.user-avatar-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: #ffffff;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  font-size: 0.95rem;
+}
+
+.user-name-text {
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* Responsive Media Queries */
+@media (max-width: 991.98px) {
+  .nav-collapse-container {
+    display: none;
+    flex-direction: column;
+    width: 100%;
+    margin-top: 12px;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.92);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    gap: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .nav-collapse-container.show {
+    display: flex;
+  }
+
+  .header-nav-list {
+    flex-direction: column;
+    width: 100%;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .nav-item-custom {
+    padding: 10px 14px !important;
+    width: 100%;
+  }
+
+  .header-right-actions {
+    flex-direction: column;
+    width: 100%;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .header-search-input {
+    width: 100% !important;
+  }
+
+  .auth-buttons-group {
+    width: 100%;
+  }
+
+  .auth-buttons-group a {
+    flex: 1;
+  }
+
+  .auth-buttons-group button {
+    width: 100%;
+  }
 }
