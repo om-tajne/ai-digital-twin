@@ -1,251 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
-import { Badge, Button, Card, Col, ProgressBar, Row } from 'react-bootstrap'
+import { useEffect, useState } from 'react'
+import { Badge, Button, Card, ProgressBar, Row, Col } from 'react-bootstrap'
 
-export default function VivaRoom({ questions = [], initialQuestionIndex = 0, onComplete }) {
+export default function VivaRoom({
+  questions = [],
+  initialQuestionIndex = 0,
+  onComplete,
+}) {
   const [currentIndex, setCurrentIndex] = useState(initialQuestionIndex || 0)
-  const [voiceState, setVoiceState] = useState('idle')
-  const [transcript, setTranscript] = useState([])
-  const [liveAnswer, setLiveAnswer] = useState('')
-  const [voiceError, setVoiceError] = useState('')
-  const [voices, setVoices] = useState([])
-  const recognitionRef = useRef(null)
+  const [selectedAnswer, setSelectedAnswer] = useState(null)
+  const [answers, setAnswers] = useState([])
 
   const currentQuestion = questions[currentIndex] || null
 
+  // Reset selected answer whenever question changes
   useEffect(() => {
-    if (!('speechSynthesis' in window)) return
-
-    const loadVoices = () => {
-      setVoices(window.speechSynthesis.getVoices())
-    }
-
-    loadVoices()
-    window.speechSynthesis.onvoiceschanged = loadVoices
-
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null
-      window.speechSynthesis.cancel()
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      recognitionRef.current?.stop?.()
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel()
-      }
-    }
-  }, [])
-
-  const getVoice = () => {
-    const englishVoices = voices.filter((voice) =>
-      voice.lang?.toLowerCase().startsWith('en')
+    const existingAnswer = answers.find(
+      (item) => item.questionId === currentQuestion?.id
     )
 
-    return (
-      englishVoices.find((voice) =>
-        /google|natural|microsoft|samantha|zira|david/i.test(voice.name)
-      ) || englishVoices[0] || voices[0] || null
-    )
-  }
-
-  const speakQuestion = () => {
-    if (!currentQuestion?.question) return
-
-    if (!('speechSynthesis' in window)) {
-      setVoiceError('Voice playback is not supported in this browser.')
-      return
-    }
-
-    window.speechSynthesis.cancel()
-    setVoiceError('')
-    setVoiceState('speaking')
-
-    const utterance = new SpeechSynthesisUtterance(currentQuestion.question)
-    utterance.lang = 'en-US'
-    utterance.rate = 0.92
-    utterance.pitch = 1
-    utterance.volume = 1
-
-    const voice = getVoice()
-    if (voice) utterance.voice = voice
-
-    utterance.onstart = () => {
-      console.log('🔊 TTS STARTED')
-      setVoiceState('speaking')
-    }
-
-    utterance.onend = () => {
-      console.log('🔊 TTS ENDED')
-      setVoiceState('ready')
-    }
-
-    utterance.onerror = (event) => {
-      console.error('❌ TTS ERROR:', event)
-      setVoiceState('ready')
-      setVoiceError('Voice could not be played. Click Hear Question again.')
-    }
-
-    window.speechSynthesis.resume()
-    window.speechSynthesis.speak(utterance)
-  }
-
-  const startAnswer = () => {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition
-
-    if (!SpeechRecognition) {
-      setVoiceError(
-        'Speech recognition is not supported here. Please use Google Chrome on desktop.'
-      )
-      return
-    }
-
-    if (!currentQuestion) return
-
-    setVoiceError('')
-    setLiveAnswer('')
-    setVoiceState('listening')
-
-    const recognition = new SpeechRecognition()
-    recognition.lang = 'en-US'
-    recognition.continuous = true
-    recognition.interimResults = true
-
-    recognition.onresult = (event) => {
-      let finalText = ''
-      let interimText = ''
-
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const text = event.results[i][0]?.transcript || ''
-        if (event.results[i].isFinal) {
-          finalText += text
-        } else {
-          interimText += text
-        }
-      }
-
-      setLiveAnswer((previous) => {
-        const combined = `${previous} ${finalText}`.trim()
-        return `${combined} ${interimText}`.trim()
-      })
-    }
-
-    recognition.onerror = (event) => {
-      console.error('❌ STT ERROR:', event)
-      setVoiceState('ready')
-      setVoiceError(
-        event.error === 'not-allowed'
-          ? 'Microphone permission was blocked. Allow microphone access in Chrome.'
-          : 'Could not hear the answer. Please try again.'
-      )
-    }
-
-    recognition.onend = () => {
-      setVoiceState((previous) =>
-        previous === 'listening' ? 'ready' : previous
-      )
-    }
-
-    recognitionRef.current = recognition
-    recognition.start()
-  }
-
-  const stopAnswer = () => {
-    recognitionRef.current?.stop?.()
-    setVoiceState('ready')
-  }
-
-  const saveCurrentAnswer = () => {
-    const answer = liveAnswer.trim()
-
-    if (!currentQuestion) return
-
-    const entry = {
-      id: `${currentQuestion.id || currentIndex}-${Date.now()}`,
-      questionPreview: currentQuestion.question,
-      examinerText: currentQuestion.question,
-      studentText: answer || 'Student response recorded.',
-      subjectName: currentQuestion.subjectName || 'General',
-      category: currentQuestion.category || 'General',
-      sourceLabel: currentQuestion.sourceLabel || 'Generated',
-    }
-
-    setTranscript((previous) => {
-      const withoutCurrent = previous.filter(
-        (item) => item.questionPreview !== currentQuestion.question
-      )
-      return [...withoutCurrent, entry]
-    })
-
-    setLiveAnswer('')
-    setVoiceState('ready')
-  }
-
-  const nextQuestion = () => {
-    if (!currentQuestion) return
-
-    recognitionRef.current?.stop?.()
-
-    const answer = liveAnswer.trim()
-    const existingEntry = transcript.find(
-      (item) => item.questionPreview === currentQuestion.question
-    )
-
-    if (answer || !existingEntry) {
-      const entry = {
-        id: `${currentQuestion.id || currentIndex}-${Date.now()}`,
-        questionPreview: currentQuestion.question,
-        examinerText: currentQuestion.question,
-        studentText: answer || 'Student response recorded.',
-        subjectName: currentQuestion.subjectName || 'General',
-        category: currentQuestion.category || 'General',
-        sourceLabel: currentQuestion.sourceLabel || 'Generated',
-      }
-
-      setTranscript((previous) => [
-        ...previous.filter(
-          (item) => item.questionPreview !== currentQuestion.question
-        ),
-        entry,
-      ])
-    }
-
-    setLiveAnswer('')
-    setCurrentIndex((previous) => Math.min(questions.length - 1, previous + 1))
-    setVoiceState('idle')
-    setVoiceError('')
-  }
-
-  const endViva = () => {
-    recognitionRef.current?.stop?.()
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
-
-    const currentAlreadyAnswered = transcript.some(
-      (item) => item.questionPreview === currentQuestion?.question
-    )
-
-    let finalTranscript = transcript
-
-    if (currentQuestion && (liveAnswer.trim() || !currentAlreadyAnswered)) {
-      finalTranscript = [
-        ...transcript.filter(
-          (item) => item.questionPreview !== currentQuestion.question
-        ),
-        {
-          id: `${currentQuestion.id || currentIndex}-${Date.now()}`,
-          questionPreview: currentQuestion.question,
-          examinerText: currentQuestion.question,
-          studentText: liveAnswer.trim() || 'Student response recorded.',
-          subjectName: currentQuestion.subjectName || 'General',
-          category: currentQuestion.category || 'General',
-          sourceLabel: currentQuestion.sourceLabel || 'Generated',
-        },
-      ]
-    }
-
-    onComplete?.(finalTranscript)
-  }
+    setSelectedAnswer(existingAnswer?.selectedAnswer ?? null)
+  }, [currentIndex, currentQuestion?.id])
 
   if (!currentQuestion) {
     return (
@@ -262,34 +36,128 @@ export default function VivaRoom({ questions = [], initialQuestionIndex = 0, onC
     ? ((currentIndex + 1) / questions.length) * 100
     : 0
 
+  /*
+   * Different question generators may use different option formats.
+   * This handles:
+   *   ["A", "B", "C", "D"]
+   *   [{text: "A"}, {text: "B"}, ...]
+   *   [{option: "A"}, ...]
+   */
+  const getOptions = () => {
+    const rawOptions =
+      currentQuestion.options ||
+      currentQuestion.choices ||
+      currentQuestion.answers ||
+      []
+
+    return rawOptions.slice(0, 4).map((option, index) => {
+      if (typeof option === 'string') {
+        return {
+          label: String.fromCharCode(65 + index),
+          text: option,
+          value: option,
+        }
+      }
+
+      const text =
+        option?.text ||
+        option?.option ||
+        option?.answer ||
+        option?.value ||
+        ''
+
+      return {
+        label:
+          option?.label ||
+          option?.key ||
+          String.fromCharCode(65 + index),
+        text,
+        value: option?.value || text,
+      }
+    })
+  }
+
+  const options = getOptions()
+
+  const selectAnswer = (option) => {
+    setSelectedAnswer(option.value)
+
+    setAnswers((previous) => {
+      const filtered = previous.filter(
+        (item) => item.questionId !== currentQuestion.id
+      )
+
+      return [
+        ...filtered,
+        {
+          questionId: currentQuestion.id || currentIndex,
+          question: currentQuestion.question,
+          selectedAnswer: option.value,
+          selectedOption: option.text,
+          subjectName: currentQuestion.subjectName || 'General',
+          category: currentQuestion.category || 'General',
+          sourceLabel: currentQuestion.sourceLabel || 'Generated',
+        },
+      ]
+    })
+  }
+
+  const nextQuestion = () => {
+    if (selectedAnswer === null) return
+
+    setCurrentIndex((previous) =>
+      Math.min(questions.length - 1, previous + 1)
+    )
+  }
+
+  const endViva = () => {
+    onComplete?.(answers)
+  }
+
   return (
     <div className="d-flex flex-column gap-4">
+      {/* Header */}
       <div className="hero-shell p-4 p-xl-5 d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
         <div>
           <div
             className="text-uppercase small mb-2"
-            style={{ letterSpacing: '0.16em', color: '#8a94a6' }}
+            style={{
+              letterSpacing: '0.16em',
+              color: '#8a94a6',
+            }}
           >
-            Live Viva Room
+            Viva Room
           </div>
-          <h2 className="m-0 fw-semibold" style={{ fontSize: 34, color: '#f8fafc' }}>
+
+          <h2
+            className="m-0 fw-semibold"
+            style={{
+              fontSize: 34,
+              color: '#f8fafc',
+            }}
+          >
             Question {currentIndex + 1} of {questions.length}
           </h2>
         </div>
+
         <Badge className="summary-badge rounded-pill px-3 py-2">
-          <i className="bi bi-mic-fill me-2" />
-          LIVE VOICE
+          <i className="bi bi-list-check me-2" />
+          MCQ VIVA
         </Badge>
       </div>
 
+      {/* Main Card */}
       <Card className="panel-surface p-4 p-xl-5">
         <ProgressBar
           now={progress}
-          style={{ height: 10, backgroundColor: '#1E293B' }}
+          style={{
+            height: 10,
+            backgroundColor: '#1E293B',
+          }}
           className="mb-4"
         />
 
-        <Row className="g-4 align-items-stretch">
+        <Row className="g-4">
           <Col lg={8}>
             <Card
               className="h-100"
@@ -300,72 +168,124 @@ export default function VivaRoom({ questions = [], initialQuestionIndex = 0, onC
                 padding: 24,
               }}
             >
+              {/* Subject / Category */}
               <div className="d-flex flex-wrap gap-2 mb-3">
                 <Badge className="summary-badge rounded-pill px-3 py-2">
                   {currentQuestion.subjectName || 'General'}
                 </Badge>
+
                 <Badge className="summary-badge rounded-pill px-3 py-2">
                   {currentQuestion.category || 'General'}
                 </Badge>
               </div>
 
+              {/* Question */}
               <div
                 className="text-uppercase small mb-2"
-                style={{ letterSpacing: '0.14em', color: '#8a94a6' }}
+                style={{
+                  letterSpacing: '0.14em',
+                  color: '#8a94a6',
+                }}
               >
-                Examiner Question
+                Viva Question
               </div>
 
               <h3
                 className="mb-4"
-                style={{ fontSize: 27, lineHeight: 1.4, color: '#f8fafc' }}
+                style={{
+                  fontSize: 27,
+                  lineHeight: 1.4,
+                  color: '#f8fafc',
+                }}
               >
                 {currentQuestion.question}
               </h3>
 
-              <div
-                className="rounded-4 p-3 mb-4"
-                style={{ background: '#1e293b', color: '#94a3b8' }}
-              >
-                <i className="bi bi-info-circle me-2" />
-                {voiceState === 'speaking'
-                  ? 'Examiner is speaking...'
-                  : voiceState === 'listening'
-                    ? 'Listening to your answer...'
-                    : 'Hear the question, then start your answer.'}
+              {/* Options */}
+              <div className="d-flex flex-column gap-3">
+                {options.map((option, index) => {
+                  const isSelected = selectedAnswer === option.value
+
+                  return (
+                    <button
+                      key={`${option.label}-${index}`}
+                      type="button"
+                      onClick={() => selectAnswer(option)}
+                      className="text-start"
+                      style={{
+                        width: '100%',
+                        padding: '18px 20px',
+                        borderRadius: 16,
+                        border: isSelected
+                          ? '2px solid #38bdf8'
+                          : '1px solid #334155',
+                        background: isSelected
+                          ? 'rgba(56, 189, 248, 0.12)'
+                          : '#1e293b',
+                        color: '#f8fafc',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 15,
+                      }}
+                    >
+                      {/* Option Letter */}
+                      <span
+                        className="d-flex align-items-center justify-content-center flex-shrink-0"
+                        style={{
+                          width: 42,
+                          height: 42,
+                          borderRadius: '50%',
+                          background: isSelected
+                            ? '#38bdf8'
+                            : '#334155',
+                          color: isSelected ? '#0f172a' : '#f8fafc',
+                          fontWeight: 700,
+                          fontSize: 16,
+                        }}
+                      >
+                        {option.label}
+                      </span>
+
+                      {/* Option Text */}
+                      <span
+                        style={{
+                          fontSize: 16,
+                          lineHeight: 1.5,
+                          fontWeight: isSelected ? 600 : 400,
+                        }}
+                      >
+                        {option.text}
+                      </span>
+
+                      {/* Selected Icon */}
+                      {isSelected && (
+                        <i
+                          className="bi bi-check-circle-fill ms-auto"
+                          style={{
+                            color: '#38bdf8',
+                            fontSize: 21,
+                          }}
+                        />
+                      )}
+                    </button>
+                  )
+                })}
               </div>
 
-              <div className="d-flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline-info"
-                  onClick={speakQuestion}
-                  disabled={voiceState === 'speaking'}
-                >
-                  <i className="bi bi-volume-up-fill me-2" />
-                  Hear Question
-                </Button>
-
-                {voiceState === 'listening' ? (
-                  <Button type="button" variant="danger" onClick={stopAnswer}>
-                    <i className="bi bi-stop-fill me-2" />
-                    Stop Answer
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    onClick={startAnswer}
-                    disabled={voiceState === 'speaking'}
-                  >
-                    <i className="bi bi-mic-fill me-2" />
-                    Start Answer
-                  </Button>
-                )}
-              </div>
+              {/* If options are missing */}
+              {options.length < 4 && (
+                <div className="alert alert-warning mt-4 mb-0">
+                  <i className="bi bi-exclamation-triangle me-2" />
+                  This question does not contain 4 options. Please regenerate
+                  the Viva questions.
+                </div>
+              )}
             </Card>
           </Col>
 
+          {/* Right Side */}
           <Col lg={4}>
             <Card
               className="h-100"
@@ -384,36 +304,30 @@ export default function VivaRoom({ questions = [], initialQuestionIndex = 0, onC
                     height: 110,
                     borderRadius: '50%',
                     background:
-                      voiceState === 'listening'
-                        ? 'rgba(56,189,248,0.18)'
-                        : 'linear-gradient(180deg, #334155, #1e293b)',
+                      'linear-gradient(180deg, #334155, #1e293b)',
                     border: '1px solid #475569',
                     color: '#7dd3fc',
                     fontSize: 38,
                   }}
                 >
-                  <i
-                    className={
-                      voiceState === 'listening'
-                        ? 'bi bi-mic-fill'
-                        : 'bi bi-person-video3'
-                    }
-                  />
+                  <i className="bi bi-person-video3" />
                 </div>
 
                 <h5 style={{ color: '#f8fafc' }}>
-                  {voiceState === 'listening'
-                    ? 'Listening...'
-                    : voiceState === 'speaking'
-                      ? 'Speaking...'
-                      : 'Ready'}
+                  {selectedAnswer !== null ? 'Answer Selected' : 'Select an Answer'}
                 </h5>
 
-                <p style={{ color: '#8a94a6', fontSize: 13 }}>
-                  Browser voice mode
+                <p
+                  style={{
+                    color: '#8a94a6',
+                    fontSize: 13,
+                  }}
+                >
+                  Choose one of the four options
                 </p>
               </div>
 
+              {/* Selected Answer Preview */}
               <div
                 className="mt-3 rounded-4 p-3"
                 style={{
@@ -423,39 +337,101 @@ export default function VivaRoom({ questions = [], initialQuestionIndex = 0, onC
                   color: '#cbd5e1',
                 }}
               >
-                <div className="small mb-2" style={{ color: '#8a94a6' }}>
+                <div
+                  className="small mb-2"
+                  style={{ color: '#8a94a6' }}
+                >
                   Your answer
                 </div>
-                {liveAnswer || 'Your spoken answer will appear here...'}
+
+                {selectedAnswer !== null ? (
+                  <div>
+                    <div
+                      className="mb-2"
+                      style={{
+                        color: '#38bdf8',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Selected Option
+                    </div>
+
+                    <div style={{ color: '#f8fafc' }}>
+                      {options.find(
+                        (option) => option.value === selectedAnswer
+                      )?.text || selectedAnswer}
+                    </div>
+                  </div>
+                ) : (
+                  <span style={{ color: '#64748b' }}>
+                    No option selected yet.
+                  </span>
+                )}
+              </div>
+
+              {/* Progress Info */}
+              <div className="mt-4">
+                <div
+                  className="d-flex justify-content-between small mb-2"
+                  style={{ color: '#8a94a6' }}
+                >
+                  <span>Progress</span>
+                  <span>
+                    {currentIndex + 1}/{questions.length}
+                  </span>
+                </div>
+
+                <ProgressBar
+                  now={progress}
+                  style={{
+                    height: 7,
+                    backgroundColor: '#1e293b',
+                  }}
+                />
               </div>
             </Card>
           </Col>
         </Row>
 
-        {voiceError ? (
-          <div className="alert alert-warning mt-4 mb-0" role="alert">
-            <i className="bi bi-exclamation-triangle me-2" />
-            {voiceError}
-          </div>
-        ) : null}
-
+        {/* Bottom Controls */}
         <div
           className="d-flex flex-column flex-md-row align-items-stretch align-items-md-center justify-content-between gap-3 mt-4 pt-4"
-          style={{ borderTop: '1px solid #262626' }}
+          style={{
+            borderTop: '1px solid #262626',
+          }}
         >
           <div style={{ color: '#8a94a6' }}>
-            {transcript.length} answer{transcript.length === 1 ? '' : 's'} recorded
+            {answers.length} answer{answers.length === 1 ? '' : 's'} recorded
           </div>
 
           <div className="d-flex flex-wrap gap-2">
             {currentIndex < questions.length - 1 ? (
-              <Button type="button" variant="primary" onClick={nextQuestion}>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={nextQuestion}
+                disabled={selectedAnswer === null}
+              >
                 Next Question
                 <i className="bi bi-arrow-right ms-2" />
               </Button>
-            ) : null}
+            ) : (
+              <Button
+                type="button"
+                variant="success"
+                onClick={endViva}
+                disabled={selectedAnswer === null}
+              >
+                <i className="bi bi-check-circle me-2" />
+                Finish Viva
+              </Button>
+            )}
 
-            <Button type="button" variant="outline-danger" onClick={endViva}>
+            <Button
+              type="button"
+              variant="outline-danger"
+              onClick={endViva}
+            >
               <i className="bi bi-stop-circle me-2" />
               End Viva
             </Button>

@@ -36,6 +36,12 @@ class LLMService:
             os.getenv("GEMINI_API_KEY")
             or os.getenv("GOOGLE_API_KEY")
         )
+        logger.info(
+    f"Gemini key loaded: "
+    f"{gemini_key[:8]}...{gemini_key[-4:]}"
+    if gemini_key
+    else "NO GEMINI KEY"
+)
 
         if not gemini_key:
             logger.error(
@@ -47,11 +53,11 @@ class LLMService:
             from langchain_google_genai import ChatGoogleGenerativeAI
 
             logger.info(
-                "Initializing Gemini with gemini-3.6-flash..."
+                "Initializing Gemini with gemini-3.5-flash-lite..."
             )
 
             llm = ChatGoogleGenerativeAI(
-                model="gemini-3.6-flash",
+                model="gemini-3.5-flash-lite",
                 google_api_key=gemini_key,
             )
 
