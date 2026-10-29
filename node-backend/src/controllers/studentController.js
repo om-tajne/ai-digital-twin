@@ -185,3 +185,40 @@ exports.updateRevisionSettings = async (req, res) => {
   }
 };
 
+// GET /api/guardian/dashboard/:student_id
+exports.getGuardianDashboard = async (req, res) => {
+  const { student_id } = req.params;
+  try {
+    const fastApiUrl = `http://localhost:8000/api/v1/guardian/dashboard/${student_id}`;
+    const response = await fetch(fastApiUrl);
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(response.status).json({ success: false, error: errText });
+    }
+    const data = await response.json();
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('Error fetching guardian dashboard:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// GET /api/guardian/students
+exports.getGuardianStudents = async (req, res) => {
+  const { guardian_email } = req.query;
+  try {
+    const fastApiUrl = `http://localhost:8000/api/v1/guardian/students${guardian_email ? `?guardian_email=${encodeURIComponent(guardian_email)}` : ''}`;
+    const response = await fetch(fastApiUrl);
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(response.status).json({ success: false, error: errText });
+    }
+    const data = await response.json();
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('Error fetching guardian students:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+

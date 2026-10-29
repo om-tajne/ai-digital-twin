@@ -11,12 +11,26 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./database/migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U twin_user -d twin_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - twin_network
 
   redis:
     image: redis:7-alpine
     container_name: twin_redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - twin_network
 
   node-backend:
     build: ./node-backend
@@ -28,8 +42,12 @@ services:
       - DATABASE_URL=postgresql://twin_user:twin_password@postgres:5432/twin_db
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - twin_network
 
   fastapi-backend:
     build:
@@ -42,17 +60,32 @@ services:
       - DATABASE_URL=postgresql://twin_user:twin_password@postgres:5432/twin_db
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - twin_network
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_NODE_API_URL: http://localhost:5000
+        VITE_FASTAPI_URL: http://localhost:8000
+        VITE_FASTAPI_API_URL: http://localhost:8000/api/v1
+        VITE_FASTAPI_WS_URL: ws://localhost:8000/api/v1
+        VITE_API_URL: http://localhost:8000
     container_name: twin_frontend
     ports:
-      - "5173:5173"
+      - "80:80"
+      - "5173:80"
     depends_on:
       - node-backend
       - fastapi-backend
+    networks:
+      - twin_network
 
   celery-worker:
     build:
@@ -64,8 +97,17 @@ services:
       - DATABASE_URL=postgresql://twin_user:twin_password@postgres:5432/twin_db
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - twin_network
+
+networks:
+  twin_network:
+    driver: bridge
 
 volumes:
   pgdata:
+    driver: local

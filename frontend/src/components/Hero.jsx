@@ -14,6 +14,7 @@ const Hero = () => {
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
+        paddingTop: "90px",
       }}
     >
       <div className="container-fluid px-4">
