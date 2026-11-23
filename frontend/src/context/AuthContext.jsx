@@ -7,7 +7,16 @@ import React, {
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  // Read the saved login synchronously so protected pages don't redirect to /login on refresh
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      localStorage.removeItem("user");
+      return null;
+    }
+  });
 
   // =========================
   // RESTORE LOGGED-IN USER

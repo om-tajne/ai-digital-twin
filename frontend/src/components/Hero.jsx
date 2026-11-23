@@ -9,12 +9,12 @@ const Hero = () => {
     <section
       className="text-white d-flex align-items-center"
       style={{
-        minHeight: "100vh",
+        minHeight: "calc(100vh - 58px)",
         backgroundImage: `url(${heroImage})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
-        paddingTop: "90px",
+        paddingTop: "24px",
       }}
     >
       <div className="container-fluid px-4">

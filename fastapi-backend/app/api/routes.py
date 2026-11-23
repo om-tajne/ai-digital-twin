@@ -9,6 +9,7 @@ import random
 from pathlib import Path
 from typing import List, Optional
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import (
     APIRouter,
     Depends,
@@ -758,7 +759,10 @@ async def upload_pdf_file(
 
         try:
             # Immediate processing ensures chunks and embeddings exist right after upload
-            result = process_pdf_task(
+            # Run in a worker thread: OCR + embeddings can take minutes and would
+            # otherwise freeze every other request (e.g. "Loading your uploaded notes...")
+            result = await run_in_threadpool(
+                process_pdf_task,
                 temp_path,
                 safe_filename,
                 str(student_uuid),

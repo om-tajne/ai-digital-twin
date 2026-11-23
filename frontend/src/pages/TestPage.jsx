@@ -18,7 +18,7 @@ import {
 } from '../data/mockData.js'
 import VivaRoom from './VivaRoom.jsx'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_FASTAPI_URL || 'http://localhost:8000'
 
 const pageStyles = `
 .test-page-shell {
@@ -871,6 +871,7 @@ export default function TestPage() {
   const [uploadedDocuments, setUploadedDocuments] = useState([])
   const [documentsLoading, setDocumentsLoading] = useState(true)
   const [documentsError, setDocumentsError] = useState('')
+  const [documentsReloadKey, setDocumentsReloadKey] = useState(0)
   const [generationError, setGenerationError] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
 
@@ -1020,9 +1021,14 @@ export default function TestPage() {
       setDocumentsLoading(true)
       setDocumentsError('')
 
+      // Never hang on "Loading..." forever: give up after 15s and offer a retry
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
       try {
         const response = await fetch(
-          `${API_URL}/api/v1/documents/${studentId}`
+          `${API_URL}/api/v1/documents/${studentId}`,
+          { signal: controller.signal }
         )
 
         const data = await response.json().catch(() => ({}))
@@ -1077,15 +1083,20 @@ export default function TestPage() {
         console.error('Failed to load uploaded documents:', error)
         setUploadedDocuments([])
         setDocumentsError(
-          error?.message || 'Unable to load uploaded notes.'
+          error?.name === 'AbortError'
+            ? 'The server took too long to respond. It may be busy processing a PDF - please retry in a moment.'
+            : error?.message === 'Failed to fetch'
+            ? `Cannot reach the backend at ${API_URL}. Make sure the FastAPI server is running.`
+            : error?.message || 'Unable to load uploaded notes.'
         )
       } finally {
+        clearTimeout(timeoutId)
         setDocumentsLoading(false)
       }
     }
 
     fetchUploadedDocuments()
-  }, [user?.student_id, user?.id])
+  }, [user?.student_id, user?.id, documentsReloadKey])
 
   const initializeSession = async () => {
     console.log('🔥 INITIALIZE SESSION CLICKED')
@@ -1507,7 +1518,17 @@ export default function TestPage() {
                 Loading your uploaded notes...
               </div>
             ) : documentsError ? (
-              <div className="alert alert-danger" role="alert">{documentsError}</div>
+              <div className="alert alert-danger d-flex align-items-center justify-content-between gap-3" role="alert">
+                <span>{documentsError}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline-light"
+                  onClick={() => setDocumentsReloadKey((key) => key + 1)}
+                >
+                  Retry
+                </Button>
+              </div>
             ) : uploadedDocuments.length === 0 ? (
               <div className="panel-surface p-4" style={{ color: '#8a94a6' }}>
                 No processed PDFs found. Upload your study notes first, then return here.
