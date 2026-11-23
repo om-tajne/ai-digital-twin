@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 from typing import List
 import pdfplumber
 
@@ -12,6 +13,47 @@ except ImportError:
         RecursiveCharacterTextSplitter = None
 
 logger = logging.getLogger(__name__)
+
+OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "50"))
+
+
+def _ocr_settings():
+    """
+    Where Tesseract / Poppler live. Works on Windows, macOS, Linux and Docker:
+    set TESSERACT_CMD / POPPLER_PATH in .env to override, otherwise the binaries
+    are found on PATH (or in the default Windows install folder).
+    """
+    tesseract_cmd = os.getenv("TESSERACT_CMD")
+    if not tesseract_cmd and os.name == "nt":
+        default = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        tesseract_cmd = default if os.path.exists(default) else None
+    return tesseract_cmd, os.getenv("POPPLER_PATH") or None
+
+
+def ocr_pdf(pdf_bytes: bytes) -> str:
+    """OCR a scanned PDF. Returns "" (and logs why) if OCR tooling is unavailable."""
+    try:
+        import pytesseract
+        from pdf2image import convert_from_bytes
+
+        tesseract_cmd, poppler_path = _ocr_settings()
+        if tesseract_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+        images = convert_from_bytes(
+            pdf_bytes, poppler_path=poppler_path, last_page=OCR_MAX_PAGES
+        )
+        pages = []
+        for index, image in enumerate(images):
+            text = pytesseract.image_to_string(image).strip()
+            if text:
+                pages.append(f"--- Page {index + 1} ---\n{text}")
+        return "\n\n".join(pages).strip()
+    except Exception as e:  # missing tesseract/poppler, corrupt file, ...
+        logger.warning(
+            "OCR skipped (%s). Install Tesseract + Poppler, or set TESSERACT_CMD / POPPLER_PATH in .env.", e
+        )
+        return ""
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """
@@ -48,6 +90,13 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
                 logger.info(f"pypdfium2 successfully extracted {len(full_text)} characters")
         except Exception as p_err:
             logger.warning(f"pypdfium2 extraction notice: {p_err}")
+
+    # 3. Scanned document (images only): run OCR
+    if len(full_text) < 50:
+        logger.info("Little selectable text found - running OCR")
+        ocr_text = ocr_pdf(pdf_bytes)
+        if len(ocr_text) > len(full_text):
+            full_text = ocr_text
 
     if not full_text:
         return "No extractable text found in the provided document."

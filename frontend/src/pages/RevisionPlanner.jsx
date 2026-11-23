@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useContext } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { Link } from "react-router-dom";
+import { FASTAPI_URL } from "../config";
 
 export default function RevisionPlanner() {
   const { user } = useContext(AuthContext);
@@ -20,7 +21,7 @@ export default function RevisionPlanner() {
   const [maxMinutes, setMaxMinutes] = useState(60);
   const [savingSettings, setSavingSettings] = useState(false);
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const API_URL = FASTAPI_URL;
 
   const fetchRevisionPlan = async () => {
     setLoading(true);

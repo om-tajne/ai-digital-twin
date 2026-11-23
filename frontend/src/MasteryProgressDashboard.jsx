@@ -6,8 +6,9 @@ import React, {
 } from "react";
 
 import { AuthContext } from "./context/AuthContext";
+import { FASTAPI_URL } from "./config";
 
-const API_URL = "http://localhost:8000";
+const API_URL = FASTAPI_URL;
 
 const STAGES = [
   "Sprouting",

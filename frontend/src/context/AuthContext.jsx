@@ -3,6 +3,7 @@ import React, {
   useState,
   useEffect
 } from "react";
+import { FASTAPI_API_URL } from "../config";
 
 export const AuthContext = createContext();
 
@@ -44,7 +45,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const res = await fetch(
-        "http://localhost:8000/api/v1/login",
+        `${FASTAPI_API_URL}/login`,
         {
           method: "POST",
           headers: {
@@ -107,7 +108,7 @@ export const AuthProvider = ({ children }) => {
   const signup = async (studentData) => {
     try {
       const res = await fetch(
-        "http://localhost:8000/api/v1/students",
+        `${FASTAPI_API_URL}/students`,
         {
           method: "POST",
           headers: {
@@ -118,16 +119,6 @@ export const AuthProvider = ({ children }) => {
       );
 
       const data = await res.json();
-
-      console.log(
-        "SIGNUP RESPONSE:",
-        JSON.stringify(data, null, 2)
-      );
-
-      console.log(
-        "DATA SENT:",
-        JSON.stringify(studentData, null, 2)
-      );
 
       if (!res.ok) {
         return {

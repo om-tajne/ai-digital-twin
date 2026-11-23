@@ -26,6 +26,7 @@ from database.session import get_db, Base, engine
 
 # Import models so SQLAlchemy registers all tables
 from database import models
+from database.schema import init_database
 
 
 # ============================================================
@@ -62,7 +63,16 @@ app = FastAPI(
 # CREATE DATABASE TABLES
 # ============================================================
 
-Base.metadata.create_all(bind=engine)
+try:
+    init_database(engine, Base)
+except Exception as exc:
+    print(
+        "\n❌ Cannot set up the database: "
+        f"{str(exc).splitlines()[0]}\n"
+        "   Is Postgres running? Start it with:  docker compose up -d postgres\n"
+        "   and check DATABASE_URL in your .env file.\n"
+    )
+    raise
 
 
 # ============================================================

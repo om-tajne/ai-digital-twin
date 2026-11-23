@@ -27,12 +27,9 @@ import {
   X,
 } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
+import { FASTAPI_URL } from "../config";
 
-// Set VITE_API_URL (Vite) or REACT_APP_API_URL (CRA) in production.
-const API_URL =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_URL) ||
-  (typeof process !== "undefined" && process.env?.REACT_APP_API_URL) ||
-  "http://localhost:8000";
+const API_URL = FASTAPI_URL;
 
 // Empty state: never show another student's demo information in the guardian portal.
 const EMPTY_DASHBOARD = {

@@ -3,10 +3,12 @@ import pytesseract
 from pdf2image import convert_from_path
 
 
-# Path to Tesseract OCR
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
+from app.services.pdf_service import _ocr_settings
+
+# Tesseract / Poppler locations come from .env (TESSERACT_CMD / POPPLER_PATH) or PATH
+_tesseract_cmd, _poppler_path = _ocr_settings()
+if _tesseract_cmd:
+    pytesseract.pytesseract.tesseract_cmd = _tesseract_cmd
 
 
 def process_pdf(file_path):
@@ -27,11 +29,7 @@ def process_pdf(file_path):
 
             images = convert_from_path(
                 file_path,
-                poppler_path=(
-                    r"C:\Users\veena\OneDrive\Documents"
-                    r"\Release-26.02.0-0\poppler-26.02.0"
-                    r"\Library\bin"
-                )
+                poppler_path=_poppler_path,
             )
 
             for image in images:

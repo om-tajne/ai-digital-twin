@@ -4,11 +4,13 @@
   "description": "AI Digital Twin Monorepo Root",
   "scripts": {
     "dev:node": "npm --prefix node-backend run dev",
-    "dev:fastapi": "cd fastapi-backend && uvicorn app.main:app --port 8000 --reload",
+    "dev:fastapi": "cd fastapi-backend && python -m uvicorn app.main:app --port 8000 --reload",
     "dev:frontend": "npm --prefix frontend run dev",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
-    "start": "start.bat"
+    "start": "node scripts/start.js",
+    "setup": "npm --prefix node-backend install && npm --prefix frontend install && python -m pip install -r fastapi-backend/requirements.txt",
+    "db:up": "docker compose up -d --wait postgres redis"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

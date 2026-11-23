@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { FASTAPI_API_URL } from "../config";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api/v1";
+const API_BASE_URL = FASTAPI_API_URL;
 
 const COLORS = {
   background: "#0F172A",

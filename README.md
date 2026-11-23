@@ -82,63 +82,52 @@ ai-digital-twin/
 ## 🚀 Getting Started
 
 ### Prerequisites
+- **Node.js** 18+ and **Python** 3.10+ (`python3` on macOS/Linux)
+- **Docker Desktop** (running) - provides PostgreSQL + pgvector and Redis
+- A free **Gemini API key** - https://aistudio.google.com/apikey
 
-Ensure you have the following installed on your machine:
-- **Node.js** (v18+)
-- **Python** (v3.10+)
-- **Docker Desktop** (running)
+### Run it (Windows, macOS, Linux)
 
----
-
-### Environment Setup
-
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd ai-digital-twin
-   ```
-
-2. Copy the example `.env` file:
-   ```bash
-   cp .env.example .env
-   ```
-
----
-
-### 🏃 Running the Application ("In One Go")
-
-#### Method 1: Standard Development Mode (Recommended)
-
-Run the one-click startup script (or `npm start`):
-
-**On Windows:**
-```cmd
-start.bat
-```
-or via npm:
 ```bash
+git clone <repository-url>
+cd ai-digital-twin
 npm start
 ```
 
-This command automatically:
-1. Starts PostgreSQL (`:5434`) and Redis (`:6379`) via Docker.
-2. Launches Node.js API (`:5000`), FastAPI (`:8000`), and React Frontend (`:5173`) concurrently.
+`npm start` (or double-click `start.bat` on Windows) does everything:
+1. creates `.env` from `.env.example` if it is missing,
+2. installs the Node and Python dependencies on the first run,
+3. starts PostgreSQL (`:5434`) and Redis (`:6379`) in Docker and waits until they are healthy,
+4. launches the Node API (`:5000`), FastAPI (`:8000`), the Celery worker and the React app (`:5173`).
 
----
+**Before your first real session, open `.env` and set `GEMINI_API_KEY`**, then restart.
+Open **http://localhost:5173**, sign up, upload a PDF under *Upload*, then use *Test Practice*.
 
-#### Method 2: Full Docker Container Mode
+Database tables are created and upgraded automatically on every FastAPI start - there is no manual migration step.
 
-To run all services fully containerized inside Docker:
+Already have your own Postgres (with the `pgvector` extension) and Redis? Put their URLs in `.env` and run `SKIP_DOCKER=1 npm start`
+(on Windows PowerShell: `$env:SKIP_DOCKER=1; npm start`).
 
+### Run everything in Docker instead
 ```bash
-npm run docker:up
-```
-*(or `docker compose up --build`)*
-
-To stop all containers:
-```bash
+npm run docker:up      # = docker compose up --build   (UI on http://localhost:5173)
 npm run docker:down
 ```
+`GEMINI_API_KEY`, `RAZORPAY_*` etc. are read from your `.env` and passed into the containers.
+
+### Scanned PDFs (OCR)
+Image-only PDFs are read with Tesseract OCR. Docker already includes it. For `npm start`, install
+[Tesseract](https://github.com/tesseract-ocr/tesseract) and [Poppler](https://poppler.freedesktop.org/) and make sure they are on your PATH,
+or set `TESSERACT_CMD` / `POPPLER_PATH` in `.env`.
+
+### Troubleshooting
+| Symptom | Fix |
+| :--- | :--- |
+| "Docker was not found" / containers fail | Start Docker Desktop, or use `SKIP_DOCKER=1` with your own Postgres + Redis |
+| Notes list shows an error with **Retry** | FastAPI isn't running or is busy - check the `FASTAPI` log lines |
+| Quiz/viva fails | `GEMINI_API_KEY` missing or invalid in `.env` |
+| Pro Plan payment fails | Add Razorpay test keys (`RAZORPAY_*`) to `.env` |
+| `vector` extension error | Postgres must be pgvector-enabled (the Docker image `pgvector/pgvector:pg16` is) |
 
 ---
 

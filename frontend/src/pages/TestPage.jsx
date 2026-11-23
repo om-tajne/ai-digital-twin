@@ -17,8 +17,9 @@ import {
   practiceQuestionBank,
 } from '../data/mockData.js'
 import VivaRoom from './VivaRoom.jsx'
+import { FASTAPI_URL } from '../config.js'
 
-const API_URL = import.meta.env.VITE_FASTAPI_URL || 'http://localhost:8000'
+const API_URL = FASTAPI_URL
 
 const pageStyles = `
 .test-page-shell {

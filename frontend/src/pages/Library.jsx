@@ -9,8 +9,9 @@ import {
 } from 'react-bootstrap'
 import { AuthContext } from '../context/AuthContext'
 import FileCard from '../components/FileCard.jsx'
+import { FASTAPI_API_URL } from '../config'
 
-const API_BASE_URL = 'http://127.0.0.1:8000/api/v1'
+const API_BASE_URL = FASTAPI_API_URL
 
 const formatDate = (dateString) => {
   if (!dateString) return 'Recently'

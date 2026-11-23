@@ -1,8 +1,8 @@
 import { useState, useEffect, useContext } from "react";
 import { Link } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
+import { FASTAPI_URL } from "../config";
 
-const FASTAPI_URL = import.meta.env.VITE_FASTAPI_URL || "http://127.0.0.1:8000";
 
 const PDFUpload = () => {
   const { user } = useContext(AuthContext);

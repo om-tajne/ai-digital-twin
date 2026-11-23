@@ -1,8 +1,9 @@
 import React, { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
+import { FASTAPI_URL } from "../config";
 
-const API_URL = "http://localhost:8000";
+const API_URL = FASTAPI_URL;
 
 export default function TopStruggles({ studentId: propStudentId }) {
   const { user } = useContext(AuthContext);

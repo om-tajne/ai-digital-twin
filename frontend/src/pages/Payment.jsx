@@ -1,7 +1,7 @@
 import { useState } from "react";
+import { NODE_API_URL } from "../config";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_BASE_URL = `${NODE_API_URL}/api`;
 
 const loadRazorpayScript = () => {
   return new Promise((resolve) => {

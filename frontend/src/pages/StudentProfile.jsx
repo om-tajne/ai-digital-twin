@@ -10,8 +10,9 @@ import {
   Spinner,
 } from "react-bootstrap";
 import { AuthContext } from "../context/AuthContext";
+import { FASTAPI_URL } from "../config";
 
-const API_URL = "http://localhost:8000";
+const API_URL = FASTAPI_URL;
 
 export default function StudentProfile() {
   const { user } = useContext(AuthContext);
