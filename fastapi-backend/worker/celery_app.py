@@ -1,5 +1,14 @@
 import os
+import sys
+from pathlib import Path
 import logging
+
+# Ensure project root and fastapi-backend are in sys.path
+BASE_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = BASE_DIR.parent
+for p in (str(ROOT_DIR), str(BASE_DIR)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 logger = logging.getLogger(__name__)
 

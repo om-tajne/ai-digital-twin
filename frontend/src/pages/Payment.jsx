@@ -84,6 +84,33 @@ function Payment() {
         );
       }
 
+      if (orderData.mockMode) {
+        // Immediate local test checkout verification
+        const verifyResponse = await fetch(
+          `${API_BASE_URL}/payment/verify`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              razorpay_order_id: orderData.orderId,
+              razorpay_payment_id: `pay_test_${Date.now()}`,
+              razorpay_signature: "mock_signature_dev",
+            }),
+          }
+        );
+
+        const verifyData = await verifyResponse.json();
+        if (verifyResponse.ok && verifyData.success) {
+          setMessage("Payment successful and Pro Plan activated! 🎉 (Test Mode)");
+        } else {
+          setMessage(verifyData.message || "Payment verification failed.");
+        }
+        setLoading(false);
+        return;
+      }
+
       // Razorpay Checkout options
       const options = {
         key: orderData.keyId,

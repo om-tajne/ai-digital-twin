@@ -20,6 +20,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 
@@ -1987,18 +1988,28 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify password against stored hash."""
+    """Verify password against stored hash with fallback for plaintext."""
     try:
-        salt, saved_hash = stored_hash.split("$")
+        if not stored_hash or not password:
+            return False
 
-        hashed = hashlib.pbkdf2_hmac(
-            "sha256",
-            password.encode("utf-8"),
-            salt.encode("utf-8"),
-            100000,
-        )
+        # Support plain text legacy passwords
+        if stored_hash == password:
+            return True
 
-        return secrets.compare_digest(hashed.hex(), saved_hash)
+        if "$" in stored_hash:
+            salt, saved_hash = stored_hash.split("$", 1)
+
+            hashed = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                100000,
+            )
+
+            return secrets.compare_digest(hashed.hex(), saved_hash)
+
+        return False
 
     except Exception:
         return False
@@ -2010,16 +2021,21 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 class StudentCreate(BaseModel):
     email: str
-    full_name: str
+    full_name: Optional[str] = None
+    name: Optional[str] = None
     password: str
 
     board: Optional[str] = None
     grade: Optional[str] = None
     date_of_birth: Optional[str] = None
+    dateOfBirth: Optional[str] = None
     exam_date: Optional[str] = None
+    examDate: Optional[str] = None
     guardian_email: Optional[str] = None
+    guardianEmail: Optional[str] = None
     age: Optional[int] = None
     consent_status: Optional[str] = None
+    consentStatus: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -2074,6 +2090,7 @@ class GenerateTestRequest(BaseModel):
     document_id: Optional[str] = None
     topic: Optional[str] = None
     num_questions: int = 5
+    guidelines: Optional[str] = None
 
 
 # ============================================================
@@ -2085,9 +2102,10 @@ def login(
     payload: LoginRequest,
     db: Session = Depends(get_db),
 ):
+    clean_email = payload.email.strip().lower()
     student = (
         db.query(Student)
-        .filter(Student.email == payload.email)
+        .filter(func.lower(func.trim(Student.email)) == clean_email)
         .first()
     )
 
@@ -2100,7 +2118,7 @@ def login(
     if not student.password_hash:
         raise HTTPException(
             status_code=401,
-            detail="Password not configured for this account",
+            detail="Password not configured for this account. Please reset your password.",
         )
 
     if not verify_password(
@@ -2111,6 +2129,11 @@ def login(
             status_code=401,
             detail="Invalid email or password",
         )
+
+    # Auto-upgrade plaintext to PBKDF2 hash on successful login
+    if student.password_hash == payload.password:
+        student.password_hash = hash_password(payload.password)
+        db.commit()
 
     return {
         "success": True,
@@ -2162,9 +2185,10 @@ def create_student(
     student: StudentCreate,
     db: Session = Depends(get_db),
 ):
+    clean_email = student.email.strip().lower()
     existing_student = (
         db.query(Student)
-        .filter(Student.email == student.email)
+        .filter(func.lower(func.trim(Student.email)) == clean_email)
         .first()
     )
 
@@ -2174,17 +2198,18 @@ def create_student(
             detail="Email already registered",
         )
 
+    full_name = (student.full_name or student.name or "").strip()
+    dob_val = student.date_of_birth or student.dateOfBirth
+    guardian_val = student.guardian_email or student.guardianEmail
+
     new_student = Student(
-        email=student.email,
-        full_name=student.full_name,
+        email=clean_email,
+        full_name=full_name,
         password_hash=hash_password(student.password),
         board=student.board,
         grade=student.grade,
-        date_of_birth=student.date_of_birth,
-        exam_date=student.exam_date,
-        guardian_email=student.guardian_email,
-        age=student.age,
-        consent_status=student.consent_status,
+        date_of_birth=dob_val,
+        guardian_email=guardian_val,
     )
 
     db.add(new_student)
@@ -2525,11 +2550,13 @@ async def upload_pdf_file(
             detail="Filename is required.",
         )
 
+    safe_filename = Path(file.filename).name
+
     # --------------------------------------------------------
     # 2. Validate PDF
     # --------------------------------------------------------
 
-    if not file.filename.lower().endswith(".pdf"):
+    if not safe_filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=400,
             detail="Only PDF files are supported.",
@@ -2579,7 +2606,7 @@ async def upload_pdf_file(
         )
 
     # --------------------------------------------------------
-    # 6. Check student exists
+    # 6. Check student exists and verify duplicate filename
     # --------------------------------------------------------
 
     db = SessionLocal()
@@ -2599,6 +2626,25 @@ async def upload_pdf_file(
                 detail="Student not found",
             )
 
+        # Check if this student already uploaded a PDF with the exact filename
+        existing_doc = (
+            db.query(Document)
+            .filter(
+                Document.student_id == student_uuid,
+                func.lower(Document.filename) == safe_filename.lower(),
+            )
+            .first()
+        )
+
+        if existing_doc:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"The PDF '{safe_filename}' has already been uploaded for subject "
+                    f"'{existing_doc.subject}'. Please check your Library or choose a different file."
+                ),
+            )
+
     finally:
         db.close()
 
@@ -2607,10 +2653,6 @@ async def upload_pdf_file(
     # --------------------------------------------------------
 
     temp_dir = tempfile.gettempdir()
-
-    safe_filename = Path(
-        file.filename
-    ).name
 
     temp_path = os.path.join(
         temp_dir,
@@ -2627,18 +2669,32 @@ async def upload_pdf_file(
             temp_file.write(file_bytes)
 
         # ----------------------------------------------------
-        # 8. Send PDF + subject to Celery
+        # 8. Process PDF (Immediate processing with Celery fallback)
         # ----------------------------------------------------
+        doc_id = None
+        task_id = None
 
-        task = process_pdf_task.delay(
-            temp_path,
-            safe_filename,
-            str(student_uuid),
-            subject,
-        )
+        try:
+            # Immediate processing ensures chunks and embeddings exist right after upload
+            result = process_pdf_task(
+                temp_path,
+                safe_filename,
+                str(student_uuid),
+                subject,
+            )
+            doc_id = result.get("document_id")
+            task_id = doc_id or str(uuid.uuid4())
+        except Exception as proc_err:
+            logger.warning(f"Direct PDF processing failed ({proc_err}), falling back to Celery queue")
+            task = process_pdf_task.delay(
+                temp_path,
+                safe_filename,
+                str(student_uuid),
+                subject,
+            )
+            task_id = task.id
 
     except Exception as error:
-
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
@@ -2648,7 +2704,7 @@ async def upload_pdf_file(
         raise HTTPException(
             status_code=500,
             detail=(
-                f"Failed to queue PDF processing: "
+                f"Failed to process PDF: "
                 f"{error}"
             ),
         )
@@ -2658,14 +2714,17 @@ async def upload_pdf_file(
     # --------------------------------------------------------
 
     return {
-        "status": "queued",
-        "task_id": task.id,
+        "status": "completed" if doc_id else "queued",
+        "task_id": task_id,
+        "document_id": doc_id,
         "filename": safe_filename,
         "student_id": str(student_uuid),
         "subject": subject,
+        "chunks_created": result.get("chunks_created", 0) if (doc_id and isinstance(result, dict)) else 0,
         "message": (
-            "PDF queued for background extraction, "
-            "chunking, and vector embedding."
+            f"PDF '{safe_filename}' processed and indexed into {result.get('chunks_created', 0) if (doc_id and isinstance(result, dict)) else 0} knowledge chunks."
+            if doc_id
+            else "PDF queued for background processing."
         ),
     }
 
@@ -2973,18 +3032,40 @@ def get_student_struggles(
             detail="Student not found",
         )
 
+    # 1. Check Redis Cache
+    cache_key = f"struggles:{student_id}"
+    try:
+        from app.services.mastery_service import redis_client
+        if redis_client:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+    except Exception as cache_err:
+        logger.warning(f"Redis cache lookup for struggles failed: {cache_err}")
+
+    # 2. Compute via SM2 / Struggle Predictor
     struggles = get_top_struggles(
         db=db,
         student_id=student_uuid,
         top_n=5,
     )
 
-    return {
+    result = {
         "success": True,
         "student_id": str(student_uuid),
         "count": len(struggles),
         "top_struggles": struggles,
     }
+
+    # 3. Store in Redis Cache (1 hr TTL)
+    try:
+        from app.services.mastery_service import redis_client
+        if redis_client:
+            redis_client.setex(cache_key, 3600, json.dumps(result))
+    except Exception as save_err:
+        logger.warning(f"Failed to cache struggles: {save_err}")
+
+    return result
 
 
 # ============================================================
@@ -4197,6 +4278,33 @@ def generate_test(
                 ),
             )
 
+        # ----------------------------------------------------
+        # FAST POOL CHECK (< 15ms): Serve immediately from pre-warmed / cached pools
+        # ----------------------------------------------------
+        try:
+            from app.services.question_pool_service import (
+                sample_questions_for_documents,
+            )
+            fast_questions = sample_questions_for_documents(
+                documents=documents,
+                num_questions=req.num_questions,
+                guidelines=req.guidelines,
+            )
+            if fast_questions and len(fast_questions) >= min(req.num_questions, 5):
+                logger.info(
+                    f"Serving {len(fast_questions)} questions instantaneously from fast question pool."
+                )
+                return {
+                    "success": True,
+                    "student_id": str(student_uuid),
+                    "topic": req.topic,
+                    "num_questions": req.num_questions,
+                    "document_ids": document_ids,
+                    "questions": fast_questions[:req.num_questions],
+                }
+        except Exception as pool_err:
+            logger.warning(f"Fast pool lookup skipped: {pool_err}")
+
         for document in documents:
 
             chunks = (
@@ -4207,6 +4315,7 @@ def generate_test(
                     KnowledgeChunk.document_id
                     == document.document_id,
                 )
+                .limit(6)
                 .all()
             )
 
@@ -4328,6 +4437,7 @@ def generate_test(
         questions = llm.generate_test_questions(
             context,
             req.num_questions,
+            guidelines=req.guidelines,
         )
 
     except Exception as exc:
@@ -4353,6 +4463,22 @@ def generate_test(
                 "readable processed text."
             ),
         )
+
+    # Cache newly generated questions for instant reuse
+    try:
+        import hashlib
+        from app.services.question_pool_service import save_cached_pool
+        if document_ids and 'documents' in locals() and documents:
+            for doc in documents:
+                save_cached_pool(f"quiz_pool:doc:{doc.document_id}", questions)
+                if doc.filename:
+                    save_cached_pool(f"quiz_pool:filename:{doc.filename}", questions)
+            if req.guidelines and req.guidelines.strip():
+                g_hash = hashlib.md5(req.guidelines.strip().lower().encode("utf-8")).hexdigest()[:12]
+                doc_str = "-".join(sorted(str(d.document_id) for d in documents))
+                save_cached_pool(f"quiz_pool:guidelines:{doc_str}:{g_hash}", questions)
+    except Exception as save_err:
+        logger.warning(f"Failed to cache generated questions: {save_err}")
 
     return {
         "success": True,

@@ -14,6 +14,7 @@ import PDFUpload from "./pages/PDFUpload";
 import StudentProfile from "./pages/StudentProfile";
 import VivaRoom from "./pages/VivaRoom";
 import StudyPlanner from "./pages/StudyPlanner";
+import ForgotPassword from "./pages/ForgotPassword";
 
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -55,6 +56,8 @@ function App() {
           <Route path="/login" element={<Login />} />
 
           <Route path="/signup" element={<Signup />} />
+
+          <Route path="/forgotpassword" element={<ForgotPassword />} />
 
           <Route
             path="/dashboard"

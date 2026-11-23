@@ -22,3 +22,19 @@ body {
   background-color: #0F172A;
 }
 
+/* Custom textarea and placeholder styling for dark mode */
+.custom-guidelines-input,
+.test-page-shell textarea.form-control {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border: 1px solid #334155 !important;
+}
+
+.custom-guidelines-input::placeholder,
+.test-page-shell textarea.form-control::placeholder,
+textarea.form-control::placeholder {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+}
+
+

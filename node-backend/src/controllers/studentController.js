@@ -1,4 +1,20 @@
 const db = require('../db');
+const crypto = require('crypto');
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash || !password) return false;
+  if (storedHash === password) return true;
+  if (storedHash.includes('$')) {
+    const [salt, savedHash] = storedHash.split('$', 2);
+    try {
+      const hash = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256').toString('hex');
+      return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(savedHash, 'hex'));
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
+}
 
 // GET /api/students
 exports.getStudents = async (req, res) => {
@@ -64,7 +80,7 @@ exports.loginStudent = async (req, res) => {
     const student = result.rows[0];
 
     // If password_hash is stored, check match (or match directly)
-    if (student.password_hash && student.password_hash !== password) {
+    if (student.password_hash && !verifyPassword(password, student.password_hash)) {
       return res.status(401).json({ success: false, error: 'Invalid password!' });
     }
 

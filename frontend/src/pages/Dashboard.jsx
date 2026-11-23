@@ -1,16 +1,19 @@
-
 import React, { useContext } from "react";
 import { Link } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import TopStruggles from "../components/TopStruggles";
+import MasteryProgressDashboard from "../MasteryProgressDashboard";
 
 export default function Dashboard() {
   const { user } = useContext(AuthContext);
 
   if (!user) {
     return (
-      <div className="container py-4 text-light">
-        Please log in to view your dashboard.
+      <div className="container py-5 text-light text-center">
+        <h4>Please log in to view your dashboard.</h4>
+        <Link to="/login" className="btn btn-primary mt-3">
+          Go to Login
+        </Link>
       </div>
     );
   }
@@ -24,6 +27,7 @@ export default function Dashboard() {
           backgroundColor: "#0F172A",
           color: "white",
           borderRadius: "16px",
+          border: "1px solid #1E293B",
         }}
       >
         <div className="card-body p-4">
@@ -34,8 +38,7 @@ export default function Dashboard() {
               </h3>
 
               <p className="text-light mb-2">
-                Unlock premium features and get a better
-                personalized learning experience.
+                Unlock premium features, voice examiners, and a personalized AI study companion.
               </p>
 
               <small className="text-secondary">
@@ -47,6 +50,7 @@ export default function Dashboard() {
               <Link
                 to="/payment"
                 className="btn btn-primary px-4 py-2"
+                style={{ borderRadius: "10px", fontWeight: 600 }}
               >
                 Upgrade to Pro
               </Link>
@@ -55,10 +59,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Existing Top Struggles */}
+      {/* AI Struggle Predictor Widget */}
       <TopStruggles studentId={user.student_id} />
+
+      {/* Dynamic Mastery Cards / Garden */}
+      <div className="mt-4">
+        <MasteryProgressDashboard />
+      </div>
     </div>
   );
 }
-
-

@@ -15,39 +15,40 @@ logger = logging.getLogger(__name__)
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """
-    Extracts text content from PDF bytes using pdfplumber.
-    Falls back to pytesseract OCR if page text is empty/scanned and pytesseract is available.
+    Extracts text content from PDF bytes using pdfplumber with pypdfium2 fallback.
     """
     extracted_text = []
 
+    # 1. Primary extraction with pdfplumber
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             for index, page in enumerate(pdf.pages):
-                page_text = page.extract_text() or ""
-                page_text = page_text.strip()
-
-                # If text is extremely short or empty, attempt OCR fallback
-                if len(page_text) < 20:
-                    try:
-                        import pytesseract
-                        from pdf2image import convert_from_bytes
-                        logger.info(f"Page {index + 1} has insufficient text. Attempting Tesseract OCR...")
-                        images = convert_from_bytes(pdf_bytes, first_page=index + 1, last_page=index + 1)
-                        if images:
-                            ocr_text = pytesseract.image_to_string(images[0]).strip()
-                            if ocr_text:
-                                page_text = ocr_text
-                    except Exception as ocr_err:
-                        logger.warning(f"OCR fallback skipped for page {index + 1}: {ocr_err}")
-
+                page_text = (page.extract_text() or "").strip()
                 if page_text:
                     extracted_text.append(f"--- Page {index + 1} ---\n{page_text}")
-
     except Exception as e:
-        logger.error(f"Error parsing PDF with pdfplumber: {e}")
-        raise RuntimeError(f"Failed to process PDF document: {str(e)}")
+        logger.warning(f"pdfplumber text extraction notice: {e}")
 
     full_text = "\n\n".join(extracted_text).strip()
+
+    # 2. Fallback to pypdfium2 (Chrome PDFium engine) if text is empty or very short
+    if len(full_text) < 50:
+        try:
+            import pypdfium2 as pdfium
+            pdf_doc = pdfium.PdfDocument(io.BytesIO(pdf_bytes))
+            pdfium_texts = []
+            for i, page in enumerate(pdf_doc):
+                text_page = page.get_textpage()
+                page_text = (text_page.get_text_range() or "").strip()
+                if page_text:
+                    pdfium_texts.append(f"--- Page {i + 1} ---\n{page_text}")
+            pdfium_full = "\n\n".join(pdfium_texts).strip()
+            if len(pdfium_full) > len(full_text):
+                full_text = pdfium_full
+                logger.info(f"pypdfium2 successfully extracted {len(full_text)} characters")
+        except Exception as p_err:
+            logger.warning(f"pypdfium2 extraction notice: {p_err}")
+
     if not full_text:
         return "No extractable text found in the provided document."
 

@@ -119,6 +119,21 @@ def test_upload_pdf(mock_delay, student, tmp_path):
     assert "task_id" in data
     assert data["subject"] == "Math"
 
+def test_upload_pdf_duplicate_returns_409(student, document, tmp_path):
+    pdf_path = tmp_path / "test_doc.pdf"
+    pdf_path.write_text("dummy pdf content")
+    
+    with open(pdf_path, "rb") as f:
+        response = client.post(
+            f"{API}/upload-pdf",
+            data={"student_id": student, "subject": "Physics"},
+            files={"file": ("test_doc.pdf", f, "application/pdf")}
+        )
+        
+    assert response.status_code == 409
+    data = response.json()
+    assert "has already been uploaded" in data["detail"]
+
 def test_get_documents(student, document):
     response = client.get(f"{API}/documents/{student}")
     assert response.status_code == 200

@@ -40,27 +40,40 @@ graph TD
 
 ## 📂 Project Structure
 
-```
+```text
 ai-digital-twin/
 ├── database/
 │   ├── migrations/
 │   │   └── init.sql         # PostgreSQL schema & pgvector initialization
 │   ├── models.py            # SQLAlchemy ORM Models
+│   ├── seed_syllabus_weights.py # DB Seeding script for syllabus
 │   └── session.py           # DB connection session factory
 ├── fastapi-backend/
-│   ├── app/                 # FastAPI application routes (RAG, BKT, LLM)
+│   ├── app/                 # FastAPI app & routes (RAG, BKT, LLM, services)
+│   ├── tests/               # Pytest test suites
 │   ├── worker/              # Celery background tasks for PDF extraction
-│   └── Dockerfile
+│   ├── Dockerfile
+│   └── requirements.txt     # Python dependencies
 ├── node-backend/
+│   ├── models/              # Express models (e.g., Payment)
 │   ├── src/                 # Express controllers, routes, Redis caching
-│   └── Dockerfile
+│   ├── Dockerfile
+│   └── package.json         # Node.js dependencies
 ├── frontend/
-│   ├── src/                 # React UI (Quiz UI, Uploads, Dashboard)
-│   └── Dockerfile
+│   ├── public/              # Static assets
+│   ├── src/                 # React UI (Dashboard, Auth, Uploads, Services)
+│   ├── Dockerfile
+│   ├── package.json         # React dependencies
+│   └── vite.config.js       # Vite configuration
+├── fix_*.py                 # Utility python scripts to clean codebase
+├── test_revision.py         # Utility script for testing revisions
+├── reset_student_password.py # Utility script to reset student passwords
 ├── docker-compose.yml       # Multi-container orchestrator
 ├── package.json             # Root monorepo scripts
 ├── start.bat                # Windows one-click launcher script
 ├── .env.example             # Template for environment variables
+├── .gitignore               # Git ignored files
+├── .dockerignore            # Docker ignored files
 └── README.md
 ```
 
@@ -145,13 +158,24 @@ npm run docker:down
 
 ### Node.js Backend (`http://localhost:5000`)
 - `POST /api/login` - Authenticate users
+- `POST /api/students` - Create a student profile
+- `GET /api/students` - Get all students
 - `GET /api/students/:student_id/top-struggles` - Ranked struggle predictions (Redis cached)
+- `POST /api/create-order` - Create Razorpay payment order
+- `POST /api/verify` - Verify Razorpay payment
+- `POST /api/webhook` - Razorpay webhook handler
 
 ### FastAPI Backend (`http://localhost:8000`)
+- `POST /api/v1/login` - FastAPI authentication
 - `POST /api/v1/students` - Create a student profile
 - `POST /api/v1/upload-pdf` - Async PDF parsing and chunking
 - `POST /api/v1/tests/generate` - RAG-based LLM Quiz Generation
+- `POST /api/v1/tests/{test_id}/submit` - Submit test and evaluate score
 - `POST /api/v1/mastery/update` - BKT Mastery engine updates
+- `GET /api/v1/mastery/{student_id}` - Get student's overall mastery data
+- `GET /api/v1/struggle-data/{student_id}` - Detailed struggle topic metrics
+- `GET /api/v1/revision/{student_id}/plan` - Get SM-2 spaced repetition revision plan
+- *(Also includes Viva voice Q&A and Guardian access routes)*
 
 ---
 

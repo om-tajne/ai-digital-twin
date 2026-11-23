@@ -247,6 +247,7 @@ class LLMService:
         self,
         context_text: str,
         num_questions: int = 5,
+        guidelines: Optional[str] = None,
     ) -> List[Dict]:
 
         # --------------------------------------------------------
@@ -277,16 +278,16 @@ class LLMService:
             return []
 
         # --------------------------------------------------------
-        # Limit context size
+        # Limit context size for fast generation
         # --------------------------------------------------------
 
-        if len(context_text) > 30000:
+        max_chars = min(10000, max(3500, num_questions * 1000))
+        if len(context_text) > max_chars:
             logger.info(
-                "Context exceeds 30000 characters. "
-                "Truncating context."
+                f"Context exceeds {max_chars} characters. "
+                "Truncating context for speed."
             )
-
-            context_text = context_text[:30000]
+            context_text = context_text[:max_chars]
 
         # --------------------------------------------------------
         # Check Gemini
@@ -301,6 +302,14 @@ class LLMService:
         # --------------------------------------------------------
         # Prompt
         # --------------------------------------------------------
+
+        guidelines_instruction = ""
+        if guidelines and guidelines.strip():
+            guidelines_instruction = f"""
+17. CUSTOM TEACHER / STUDENT GUIDELINES:
+Strictly incorporate these specific session constraints/focus areas:
+"{guidelines.strip()}"
+"""
 
         prompt = f"""
 You are an expert teacher and educational quiz generator.
@@ -331,6 +340,7 @@ STRICT RULES:
 14. Do NOT use Markdown.
 15. Do NOT use ```json.
 16. Do NOT add explanations before or after the JSON.
+17. Keep each question's 'explanation' concise (1-2 sentences). Do NOT output overly long paragraphs.{guidelines_instruction}
 
 Each question object MUST contain:
 
@@ -417,14 +427,11 @@ STUDY MATERIAL:
                 return []
 
             # ----------------------------------------------------
-            # Validate number of questions
+            # Validate number of questions (tolerant to minor LLM count variations)
             # ----------------------------------------------------
 
-            if len(questions) != num_questions:
-                logger.error(
-                    f"Gemini returned {len(questions)} questions "
-                    f"but exactly {num_questions} were required."
-                )
+            if not questions:
+                logger.error("Gemini returned empty question list.")
                 return []
 
             # ----------------------------------------------------
@@ -501,16 +508,23 @@ STUDY MATERIAL:
             valid_questions = unique_questions
 
             # ----------------------------------------------------
-            # Final exact-count validation
+            # Final validation and count alignment
             # ----------------------------------------------------
 
-            if len(valid_questions) != num_questions:
-                logger.error(
-                    f"Expected exactly {num_questions} valid questions "
-                    f"after validation, but received "
-                    f"{len(valid_questions)}."
+            if len(valid_questions) >= num_questions:
+                logger.info(
+                    f"Successfully generated {len(valid_questions)} questions, slicing to requested {num_questions}."
                 )
-                return []
+                return valid_questions[:num_questions]
+
+            if len(valid_questions) > 0:
+                logger.info(
+                    f"Generated {len(valid_questions)} valid questions (requested {num_questions})."
+                )
+                return valid_questions
+
+            logger.error("No valid questions remained after validation.")
+            return []
 
             logger.info(
                 f"Successfully generated "

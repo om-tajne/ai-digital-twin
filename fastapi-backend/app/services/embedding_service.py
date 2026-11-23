@@ -67,8 +67,13 @@ class EmbeddingService:
             try:
                 from langchain_google_genai import GoogleGenerativeAIEmbeddings
                 model_name = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
+                if not model_name.startswith("models/"):
+                    model_name = f"models/{model_name}"
                 logger.info(f"Initializing LangChain GoogleGenerativeAIEmbeddings with model '{model_name}'")
-                return GoogleGenerativeAIEmbeddings(model=model_name, google_api_key=gemini_key)
+                model = GoogleGenerativeAIEmbeddings(model=model_name, google_api_key=gemini_key)
+                # Fast validation ping: verify credentials work without delay during request handling
+                model.embed_query("ping")
+                return model
             except Exception as e:
                 logger.warning(f"Failed to initialize GoogleGenerativeAIEmbeddings: {e}. Falling back to fallback embeddings.")
 
@@ -98,9 +103,9 @@ class EmbeddingService:
             raw_vector = self.embeddings_model.embed_query(text)
             return self._normalize_dimension(raw_vector)
         except Exception as e:
-            logger.error(f"Error generating embedding via LangChain model: {e}. Using fallback.")
-            fallback = FallbackEmbeddings()
-            return fallback.embed_query(text)
+            logger.error(f"Error generating embedding via LangChain model: {e}. Switching to fallback.")
+            self.embeddings_model = FallbackEmbeddings()
+            return self.embeddings_model.embed_query(text)
 
     def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """
@@ -118,9 +123,9 @@ class EmbeddingService:
             raw_vectors = self.embeddings_model.embed_documents(valid_texts)
             return [self._normalize_dimension(vec) for vec in raw_vectors]
         except Exception as e:
-            logger.error(f"Error generating batch embeddings via LangChain model: {e}. Using fallback.")
-            fallback = FallbackEmbeddings()
-            return fallback.embed_documents(valid_texts)
+            logger.error(f"Error generating batch embeddings via LangChain model: {e}. Switching to fallback.")
+            self.embeddings_model = FallbackEmbeddings()
+            return self.embeddings_model.embed_documents(valid_texts)
 
 
 # -----------------------------------------
