@@ -2722,11 +2722,26 @@ from app.services.revision_service import (
 # REVISION PLANNER
 # ============================================================
 
+def _require_existing_student(db: Session, student_id: str) -> None:
+    """400 for a malformed id, 404 for an unknown student (instead of a 500 DB error)."""
+    try:
+        student_uuid = uuid.UUID(str(student_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid student_id")
+    exists = db.query(Student.student_id).filter(Student.student_id == student_uuid).first()
+    if not exists:
+        raise HTTPException(
+            status_code=404,
+            detail="Student not found. Please log in again.",
+        )
+
+
 @router.get("/revision/{student_id}/plan")
 def get_student_revision_plan(
     student_id: str,
     db: Session = Depends(get_db),
 ):
+    _require_existing_student(db, student_id)
     try:
         return get_revision_plan(db, student_id)
     except Exception as e:
@@ -2740,6 +2755,7 @@ def update_student_revision_settings(
     payload: RevisionSettingsRequest,
     db: Session = Depends(get_db),
 ):
+    _require_existing_student(db, student_id)
     try:
         return update_revision_settings(
             db,
@@ -2757,6 +2773,7 @@ def review_revision_task(
     payload: RevisionReviewRequest,
     db: Session = Depends(get_db),
 ):
+    _require_existing_student(db, student_id)
     try:
         return record_topic_review(
             db,

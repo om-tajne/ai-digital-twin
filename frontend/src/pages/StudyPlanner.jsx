@@ -136,9 +136,20 @@ export default function StudyPlanner() {
           errorText
         );
 
-        throw new Error(
+        // Saved login points to a student this server doesn't know
+        // (e.g. the database was recreated): sign out and ask to log in again.
+        if (response.status === 404 || response.status === 400) {
+          localStorage.removeItem("user");
+          localStorage.removeItem("student_id");
+          window.location.href = "/login";
+          return;
+        }
+
+        const serverError = new Error(
           `Failed to fetch revision plan: ${response.status}`
         );
+        serverError.status = response.status;
+        throw serverError;
       }
 
       const data = await response.json();
@@ -167,7 +178,9 @@ export default function StudyPlanner() {
       );
 
       setError(
-        "Unable to load your study plan. Please make sure the backend is running."
+        err.status
+          ? `The server could not build your study plan (error ${err.status}). Check the FastAPI terminal for details.`
+          : `Cannot reach the backend at ${API_BASE_URL}. Make sure FastAPI is running (npm start).`
       );
     } finally {
       setLoading(false);
