@@ -210,34 +210,68 @@ def sync_struggles_to_revision_schedule(
             )
 
     # --------------------------------------------------------
+    # Normalise + de-duplicate struggles
+    # --------------------------------------------------------
+    # The same topic can appear several times (different casing, stray
+    # spaces, blank vs "General" subject). The table is unique on
+    # (student, subject, topic), so merge duplicates first and keep the
+    # worst (highest) struggle score.
+
+    def _clean(value, default=""):
+        return " ".join(str(value or "").split()) or default
+
+    def _key(subject_name, topic_name):
+        return (subject_name.lower(), topic_name.lower())
+
+    unique_items = {}
+
+    for item in struggles:
+        topic_name = _clean(item.get("topic"))
+        subject_name = _clean(item.get("subject"), "General")
+
+        if not topic_name:
+            continue
+
+        key = _key(subject_name, topic_name)
+        score = float(item.get("struggle_score", 0.5))
+
+        if key not in unique_items or score > unique_items[key]["struggle_score"]:
+            unique_items[key] = {
+                "topic": topic_name,
+                "subject": subject_name,
+                "struggle_score": score,
+                "syllabus_weight": float(item.get("syllabus_weight", 1.0)),
+            }
+
+    # --------------------------------------------------------
+    # Existing schedules, indexed by the same normalised key
+    # --------------------------------------------------------
+
+    existing_by_key = {}
+
+    for row in (
+        db.query(RevisionSchedule)
+        .filter(RevisionSchedule.student_id == student_id)
+        .order_by(RevisionSchedule.created_at.asc())
+        .all()
+    ):
+        existing_by_key.setdefault(
+            _key(_clean(row.subject, "General"), _clean(row.topic)),
+            row,
+        )
+
+    # --------------------------------------------------------
     # Create/update revision schedules
     # --------------------------------------------------------
 
-    for item in struggles:
+    for key, item in unique_items.items():
 
         topic_name = item["topic"]
         subject_name = item["subject"]
+        struggle_score = item["struggle_score"]
+        syllabus_weight = item["syllabus_weight"]
 
-        struggle_score = float(
-            item.get("struggle_score", 0.5)
-        )
-
-        syllabus_weight = float(
-            item.get("syllabus_weight", 1.0)
-        )
-
-        # ----------------------------------------------------
-        # Find existing schedule
-        # ----------------------------------------------------
-
-        existing = (
-            db.query(RevisionSchedule)
-            .filter(
-                RevisionSchedule.student_id == student_id,
-                RevisionSchedule.topic == topic_name,
-            )
-            .first()
-        )
+        existing = existing_by_key.get(key)
 
         estimated_mins = estimate_study_minutes(
             struggle_score,
@@ -270,6 +304,7 @@ def sync_struggles_to_revision_schedule(
             )
 
             db.add(new_schedule)
+            existing_by_key[key] = new_schedule
 
         # ----------------------------------------------------
         # Update existing schedule
@@ -278,11 +313,8 @@ def sync_struggles_to_revision_schedule(
         else:
 
             existing.struggle_score = struggle_score
-            existing.subject = subject_name
             existing.estimated_minutes = estimated_mins
 
-            # IMPORTANT:
-            # Model uses next_review_date, not scheduled_date
             is_overdue = (
                 existing.next_review_date <= today
                 and existing.status == "PENDING"
@@ -293,12 +325,10 @@ def sync_struggles_to_revision_schedule(
                 is_overdue,
             )
 
-            # If task is due and not completed,
-            # keep it pending.
-            if (
-                existing.next_review_date <= today
-                and existing.status != "COMPLETED"
-            ):
+            # A task that is due (including a COMPLETED one whose
+            # spaced-repetition interval has elapsed) goes back to PENDING.
+            # Without this, a reviewed topic never came back for revision.
+            if existing.next_review_date <= today:
                 existing.status = "PENDING"
 
     db.commit()
@@ -456,13 +486,21 @@ def get_revision_plan(
         )
     ]
 
+    def _reviewed_today(task):
+        # last_reviewed_at is stored as naive UTC; compare in local time
+        if not task.last_reviewed_at:
+            return False
+        reviewed = task.last_reviewed_at
+        if reviewed.tzinfo is None:
+            reviewed = reviewed.replace(tzinfo=timezone.utc)
+        return reviewed.astimezone().date() == today
+
+    # A reviewed task is rescheduled into the future right away, so
+    # "completed today" must be judged by when it was reviewed.
     completed_today = [
         task
         for task in tasks
-        if (
-            task.next_review_date == today
-            and task.status == "COMPLETED"
-        )
+        if task.status == "COMPLETED" and _reviewed_today(task)
     ]
 
     upcoming_tasks = [
@@ -495,6 +533,10 @@ def get_revision_plan(
             "estimated_minutes": task.estimated_minutes,
             "scheduled_date": task.next_review_date.isoformat(),
             "status": task.status,
+            "completed_today": (
+                task.status == "COMPLETED"
+                and _reviewed_today(task)
+            ),
             "last_reviewed_at": (
                 task.last_reviewed_at.isoformat()
                 if task.last_reviewed_at
@@ -525,7 +567,7 @@ def get_revision_plan(
 
         "upcoming_tasks": [
             format_task(task)
-            for task in upcoming_tasks[:10]
+            for task in upcoming_tasks
         ],
 
         "all_tasks": [

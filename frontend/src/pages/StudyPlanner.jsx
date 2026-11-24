@@ -1,18 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { FASTAPI_API_URL } from "../config";
 
 const API_BASE_URL = FASTAPI_API_URL;
 
-const COLORS = {
-  background: "#0F172A",
-  primary: "#2563EB",
-  secondary: "#1E3A8A",
-  card: "#172554",
-  cardLight: "#1E293B",
-  border: "#334155",
-  text: "#F8FAFC",
-  muted: "#CBD5E1",
-};
+const DAILY_LIMIT_OPTIONS = [30, 45, 60, 90, 120, 180];
+
+// ============================================================
+// HELPERS
+// ============================================================
 
 function getStudentId() {
   try {
@@ -30,114 +26,147 @@ function getStudentId() {
   }
 }
 
-function getToday() {
-  return new Date().toISOString().split("T")[0];
+// Local calendar date as YYYY-MM-DD (toISOString() would use UTC and
+// show the wrong day for students in e.g. India after midnight).
+function toDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
-function formatDate(dateString) {
-  if (!dateString) return "No date";
+function parseDateKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
 
-  const date = new Date(dateString);
+function addDays(key, days) {
+  const date = parseDateKey(key);
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+}
 
-  if (Number.isNaN(date.getTime())) {
-    return dateString;
-  }
-
-  return date.toLocaleDateString("en-IN", {
+function formatLongDate(key) {
+  return parseDateKey(key).toLocaleDateString("en-IN", {
+    weekday: "short",
     day: "numeric",
     month: "short",
     year: "numeric",
   });
 }
 
-function getPriorityColor(priority) {
-  const value = String(priority || "").toLowerCase();
+function relativeDayLabel(key, todayKey) {
+  const diff = Math.round(
+    (parseDateKey(key) - parseDateKey(todayKey)) / 86400000
+  );
 
-  if (value === "high") return "#2563EB";
-  if (value === "medium") return "#3B82F6";
-  if (value === "low") return "#60A5FA";
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  if (diff === -1) return "Yesterday";
+  if (diff > 1 && diff < 7) {
+    return parseDateKey(key).toLocaleDateString("en-IN", { weekday: "long" });
+  }
+  return formatLongDate(key);
+}
 
-  return "#64748B";
+function formatMinutes(total) {
+  const mins = Number(total) || 0;
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+const PRIORITY_STYLES = {
+  HIGH: {
+    label: "High Priority",
+    color: "#f87171",
+    bg: "rgba(239, 68, 68, 0.15)",
+    border: "rgba(239, 68, 68, 0.35)",
+    bar: "#ef4444",
+  },
+  MEDIUM: {
+    label: "Medium Priority",
+    color: "#fbbf24",
+    bg: "rgba(245, 158, 11, 0.15)",
+    border: "rgba(245, 158, 11, 0.35)",
+    bar: "#f59e0b",
+  },
+  LOW: {
+    label: "Low Priority",
+    color: "#38bdf8",
+    bg: "rgba(56, 189, 248, 0.15)",
+    border: "rgba(56, 189, 248, 0.35)",
+    bar: "#38bdf8",
+  },
+};
+
+function priorityStyle(priority) {
+  return PRIORITY_STYLES[String(priority || "").toUpperCase()] || PRIORITY_STYLES.LOW;
 }
 
 function normalizeTask(task) {
   return {
     id: task.schedule_id,
-
     topic: task.topic || "Study Task",
-
     subject: task.subject || "General",
-
-    taskType: task.task_type || "Revision",
-
-    priority: task.priority || "LOW",
-
-    scheduledDate: task.scheduled_date || getToday(),
-
+    priority: String(task.priority || "LOW").toUpperCase(),
+    scheduledDate: String(task.scheduled_date || "").slice(0, 10),
     duration: Number(task.estimated_minutes || 15),
-
-    completed:
-      String(task.status || "").toUpperCase() === "COMPLETED",
-
+    completed: Boolean(task.completed_today),
     struggleScore: Number(task.struggle_score || 0),
-
     repetition: Number(task.repetition || 0),
-
     easeFactor: Number(task.ease_factor || 2.5),
-
     intervalDays: Number(task.interval_days || 1),
-
-    lastReviewedAt: task.last_reviewed_at || null,
-
     status: task.status || "PENDING",
   };
 }
 
+// ============================================================
+// COMPONENT
+// ============================================================
+
 export default function StudyPlanner() {
-  const [selectedDate, setSelectedDate] = useState(getToday());
-
-  const [tasks, setTasks] = useState([]);
-
-  const [loading, setLoading] = useState(true);
-
-  const [completingTask, setCompletingTask] = useState(null);
-
-  const [error, setError] = useState("");
-
-  const [maxDailyMinutes, setMaxDailyMinutes] = useState(60);
-
+  const navigate = useNavigate();
   const studentId = getStudentId();
+  const todayKey = toDateKey(new Date());
 
-  // ============================================================
-  // FETCH DYNAMIC REVISION PLAN
-  // ============================================================
+  const [plan, setPlan] = useState({
+    todayTasks: [],
+    completedToday: [],
+    allTasks: [],
+  });
+  const [selectedDate, setSelectedDate] = useState(todayKey);
+  const [maxDailyMinutes, setMaxDailyMinutes] = useState(60);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [busyTask, setBusyTask] = useState(null);
+  const [showInfo, setShowInfo] = useState(false);
 
-  const fetchTasks = async () => {
+  // ------------------------------------------------------------
+  // LOAD PLAN
+  // ------------------------------------------------------------
+
+  const fetchPlan = async () => {
     if (!studentId) {
-      setError("Student ID not found. Please login again.");
+      setError("Student ID not found. Please log in again.");
       setLoading(false);
       return;
     }
 
-    try {
-      setLoading(true);
-      setError("");
+    setLoading(true);
+    setError("");
 
-      const response = await fetch(
-        `${API_BASE_URL}/revision/${studentId}/plan`
-      );
+    try {
+      const response = await fetch(`${API_BASE_URL}/revision/${studentId}/plan`);
 
       if (!response.ok) {
         const errorText = await response.text();
-
-        console.error(
-          "Revision plan API error:",
-          response.status,
-          errorText
-        );
+        console.error("Revision plan API error:", response.status, errorText);
 
         // Saved login points to a student this server doesn't know
-        // (e.g. the database was recreated): sign out and ask to log in again.
+        // (e.g. the database was recreated): sign out and log in again.
         if (response.status === 404 || response.status === 400) {
           localStorage.removeItem("user");
           localStorage.removeItem("student_id");
@@ -145,41 +174,34 @@ export default function StudyPlanner() {
           return;
         }
 
-        const serverError = new Error(
-          `Failed to fetch revision plan: ${response.status}`
-        );
+        let detail = "";
+        try {
+          detail = JSON.parse(errorText)?.detail || "";
+        } catch {
+          /* not JSON */
+        }
+        const serverError = new Error(detail || `Server error ${response.status}`);
         serverError.status = response.status;
         throw serverError;
       }
 
       const data = await response.json();
 
-      console.log("Dynamic Revision Plan:", data);
-
-      // Dynamic daily limit from backend
       if (data.max_daily_minutes !== undefined) {
-        setMaxDailyMinutes(
-          Number(data.max_daily_minutes)
-        );
+        setMaxDailyMinutes(Number(data.max_daily_minutes));
       }
 
-      // Dynamic tasks from backend
-      const allTasks = Array.isArray(data.all_tasks)
-        ? data.all_tasks
-        : [];
-
-      setTasks(
-        allTasks.map(normalizeTask)
-      );
+      setPlan({
+        todayTasks: (data.today_tasks || []).map(normalizeTask),
+        completedToday: (data.completed_today || []).map(normalizeTask),
+        allTasks: (data.all_tasks || []).map(normalizeTask),
+      });
     } catch (err) {
-      console.error(
-        "Revision planner fetch error:",
-        err
-      );
+      console.error("Revision planner fetch error:", err);
 
       setError(
         err.status
-          ? `The server could not build your study plan (error ${err.status}). Check the FastAPI terminal for details.`
+          ? `The server could not build your study plan (${String(err.message).slice(0, 160)}). Check the FastAPI terminal for details.`
           : `Cannot reach the backend at ${API_BASE_URL}. Make sure FastAPI is running (npm start).`
       );
     } finally {
@@ -187,879 +209,688 @@ export default function StudyPlanner() {
     }
   };
 
-  // ============================================================
-  // INITIAL LOAD
-  // ============================================================
-
   useEffect(() => {
-    fetchTasks();
+    fetchPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentId]);
 
-  // ============================================================
-  // SELECTED DATE TASKS
-  // ============================================================
+  // ------------------------------------------------------------
+  // DERIVED DATA
+  // ------------------------------------------------------------
 
-  const selectedTasks = useMemo(() => {
-    return tasks.filter(
-      (task) =>
-        task.scheduledDate?.slice(0, 10) === selectedDate
-    );
-  }, [tasks, selectedDate]);
+  // Tasks to review on the selected day (today also shows what was finished today)
+  const dayTasks = useMemo(() => {
+    if (selectedDate === todayKey) {
+      return [...plan.todayTasks, ...plan.completedToday];
+    }
+    return plan.allTasks.filter((task) => task.scheduledDate === selectedDate);
+  }, [plan, selectedDate, todayKey]);
 
-  // ============================================================
-  // UPCOMING TASKS
-  // ============================================================
-
-  const upcomingTasks = useMemo(() => {
-    return tasks
-      .filter(
-        (task) =>
-          task.scheduledDate?.slice(0, 10) > selectedDate &&
-          !task.completed
-      )
-      .sort((a, b) =>
-        String(a.scheduledDate).localeCompare(
-          String(b.scheduledDate)
-        )
-      )
-      .slice(0, 6);
-  }, [tasks, selectedDate]);
-
-  // ============================================================
-  // DYNAMIC STATISTICS
-  // ============================================================
-
-  const completedCount = selectedTasks.filter(
-    (task) => task.completed
-  ).length;
-
-  const pendingCount =
-    selectedTasks.length - completedCount;
-
-  const totalDuration = selectedTasks.reduce(
-    (total, task) =>
-      total + Number(task.duration || 0),
-    0
+  // Every future review, oldest first (completed-today tasks show their NEXT review date)
+  const upcomingTasks = useMemo(
+    () =>
+      plan.allTasks
+        .filter((task) => task.scheduledDate > todayKey)
+        .sort(
+          (a, b) =>
+            a.scheduledDate.localeCompare(b.scheduledDate) ||
+            b.struggleScore - a.struggleScore
+        ),
+    [plan, todayKey]
   );
 
-  const completionPercentage =
-    selectedTasks.length > 0
-      ? Math.round(
-          (completedCount / selectedTasks.length) * 100
-        )
-      : 0;
+  const upcomingByDate = useMemo(() => {
+    const groups = new Map();
+    upcomingTasks.forEach((task) => {
+      if (!groups.has(task.scheduledDate)) groups.set(task.scheduledDate, []);
+      groups.get(task.scheduledDate).push(task);
+    });
+    return [...groups.entries()];
+  }, [upcomingTasks]);
 
-  // ============================================================
-  // COMPLETE REVISION TASK
-  // ============================================================
+  // 7-day strip: how busy each day is
+  const weekStrip = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const key = addDays(todayKey, i);
+      const tasks =
+        key === todayKey
+          ? plan.todayTasks
+          : plan.allTasks.filter((task) => task.scheduledDate === key);
+      return {
+        key,
+        count: tasks.length,
+        minutes: tasks.reduce((sum, task) => sum + task.duration, 0),
+      };
+    });
+  }, [plan, todayKey]);
 
-  const completeTask = async (scheduleId) => {
-    if (!scheduleId) {
-      setError("Revision schedule ID is missing.");
-      return;
-    }
+  const completedCount = dayTasks.filter((task) => task.completed).length;
+  const pendingTasks = dayTasks.filter((task) => !task.completed);
+  const pendingMinutes = pendingTasks.reduce((sum, task) => sum + task.duration, 0);
+  const completionPct = dayTasks.length
+    ? Math.round((completedCount / dayTasks.length) * 100)
+    : 0;
+  const loadPct = Math.min(
+    100,
+    Math.round((pendingMinutes / Math.max(1, maxDailyMinutes)) * 100)
+  );
+  const hasAnyTasks = plan.allTasks.length > 0;
 
-    if (!studentId) {
-      setError("Student ID not found. Please login again.");
-      return;
-    }
+  // ------------------------------------------------------------
+  // ACTIONS
+  // ------------------------------------------------------------
+
+  const reviewTask = async (task, qualityScore) => {
+    setBusyTask(task.id);
+    setActionError("");
 
     try {
-      setCompletingTask(scheduleId);
-      setError("");
-
-      const response = await fetch(
-        `${API_BASE_URL}/revision/${studentId}/review`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            schedule_id: scheduleId,
-
-            // Current backend expects quality_score.
-            // 5 means successful/perfect revision.
-            quality_score: 5,
-          }),
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/revision/${studentId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schedule_id: task.id,
+          quality_score: qualityScore,
+        }),
+      });
 
       if (!response.ok) {
-        const errorText = await response.text();
-
-        console.error(
-          "Review API error:",
-          response.status,
-          errorText
-        );
-
-        throw new Error(
-          `Failed to complete task: ${response.status}`
-        );
+        console.error("Review API error:", response.status, await response.text());
+        throw new Error(`Failed to save review (${response.status})`);
       }
 
-      /*
-       * IMPORTANT:
-       * Do not manually mark only the local task as completed.
-       *
-       * Backend changes:
-       * - repetition
-       * - ease factor
-       * - interval
-       * - next review date
-       * - status
-       *
-       * Therefore fetch the complete plan again.
-       */
-
-      await fetchTasks();
-
+      // Backend recalculates interval / next review date, so reload the plan
+      await fetchPlan();
     } catch (err) {
-      console.error(
-        "Complete revision error:",
-        err
-      );
-
-      setError(
-        "Unable to complete this revision task. Please try again."
-      );
+      console.error("Complete revision error:", err);
+      setActionError("Unable to save this review. Please try again.");
     } finally {
-      setCompletingTask(null);
+      setBusyTask(null);
     }
   };
 
-  // ============================================================
-  // UI
-  // ============================================================
+  const changeDailyLimit = async (minutes) => {
+    const previous = maxDailyMinutes;
+    setMaxDailyMinutes(minutes);
+    setActionError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/revision/${studentId}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_daily_minutes: minutes }),
+      });
+
+      if (!response.ok) throw new Error(`Settings failed (${response.status})`);
+
+      await fetchPlan();
+    } catch (err) {
+      console.error("Update daily limit error:", err);
+      setMaxDailyMinutes(previous);
+      setActionError("Could not change the daily study limit.");
+    }
+  };
+
+  const practiceTopic = (task) =>
+    navigate(
+      `/test?topic=${encodeURIComponent(task.topic)}&subject=${encodeURIComponent(task.subject)}`
+    );
+
+  // ------------------------------------------------------------
+  // RENDER
+  // ------------------------------------------------------------
+
+  const isToday = selectedDate === todayKey;
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: COLORS.background,
-        color: COLORS.text,
-        padding: "30px 15px",
-      }}
-    >
-      <div className="container">
-
-        {/* ================================================== */}
-        {/* PAGE HEADER */}
-        {/* ================================================== */}
-
-        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
-
-          <div>
-            <h1 className="fw-bold mb-2">
-              📚 Study Planner
-            </h1>
-
-            <p
-              className="mb-0"
-              style={{ color: COLORS.muted }}
-            >
-              Your revision plan is generated dynamically
-              from your learning progress and struggles.
-            </p>
-          </div>
-
-          <div className="mt-3 mt-md-0">
-
-            <label
-              className="form-label mb-1"
-              style={{ color: COLORS.muted }}
-            >
-              Select Date
-            </label>
-
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) =>
-                setSelectedDate(e.target.value)
-              }
-              className="form-control"
-            />
-
-          </div>
-        </div>
-
-        {/* ================================================== */}
-        {/* ERROR */}
-        {/* ================================================== */}
-
-        {error && (
-          <div
-            className="alert mb-4"
-            style={{
-              backgroundColor: "#172554",
-              color: "#BFDBFE",
-              border: "1px solid #2563EB",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {/* ================================================== */}
-        {/* STATISTICS */}
-        {/* ================================================== */}
-
-        <div className="row g-3 mb-4">
-
-          {/* TOTAL TASKS */}
-          <div className="col-md-3">
-            <div
-              className="p-4 rounded-4 h-100"
-              style={{
-                backgroundColor: COLORS.card,
-                border: `1px solid ${COLORS.border}`,
-              }}
-            >
-              <div
-                className="mb-2"
-                style={{
-                  color: COLORS.muted,
-                }}
-              >
-                📋 Tasks
+    <div className="sp-page">
+      <div className="sp-container">
+        {/* ============ MAIN CARD ============ */}
+        <div className="sp-card">
+          <div className="sp-header">
+            <div>
+              <div className="sp-badge">
+                <span className="sp-dot" />
+                Spaced Repetition Planner
               </div>
-
-              <h2 className="fw-bold mb-0">
-                {selectedTasks.length}
-              </h2>
-            </div>
-          </div>
-
-          {/* COMPLETED */}
-          <div className="col-md-3">
-            <div
-              className="p-4 rounded-4 h-100"
-              style={{
-                backgroundColor: COLORS.card,
-                border: `1px solid ${COLORS.border}`,
-              }}
-            >
-              <div
-                className="mb-2"
-                style={{
-                  color: COLORS.muted,
-                }}
-              >
-                ✅ Completed
-              </div>
-
-              <h2 className="fw-bold mb-0">
-                {completedCount}
-              </h2>
-            </div>
-          </div>
-
-          {/* PENDING */}
-          <div className="col-md-3">
-            <div
-              className="p-4 rounded-4 h-100"
-              style={{
-                backgroundColor: COLORS.card,
-                border: `1px solid ${COLORS.border}`,
-              }}
-            >
-              <div
-                className="mb-2"
-                style={{
-                  color: COLORS.muted,
-                }}
-              >
-                ⏳ Pending
-              </div>
-
-              <h2 className="fw-bold mb-0">
-                {pendingCount}
-              </h2>
-            </div>
-          </div>
-
-          {/* STUDY TIME */}
-          <div className="col-md-3">
-            <div
-              className="p-4 rounded-4 h-100"
-              style={{
-                backgroundColor: COLORS.card,
-                border: `1px solid ${COLORS.border}`,
-              }}
-            >
-              <div
-                className="mb-2"
-                style={{
-                  color: COLORS.muted,
-                }}
-              >
-                ⏱ Study Time
-              </div>
-
-              <h2 className="fw-bold mb-0">
-                {totalDuration} min
-              </h2>
-
-              <small
-                style={{
-                  color: COLORS.muted,
-                }}
-              >
-                Daily limit: {maxDailyMinutes} min
-              </small>
-            </div>
-          </div>
-
-        </div>
-
-        {/* ================================================== */}
-        {/* PROGRESS */}
-        {/* ================================================== */}
-
-        {!loading && selectedTasks.length > 0 && (
-          <div
-            className="p-4 rounded-4 mb-4"
-            style={{
-              backgroundColor: COLORS.card,
-              border: `1px solid ${COLORS.border}`,
-            }}
-          >
-            <div className="d-flex justify-content-between mb-2">
-
-              <span
-                style={{
-                  color: COLORS.muted,
-                }}
-              >
-                Daily Progress
-              </span>
-
-              <strong>
-                {completionPercentage}%
-              </strong>
-
+              <h3 className="sp-title">Study Planner</h3>
+              <p className="sp-desc">
+                Revision schedule built from your struggles via{" "}
+                <code>SM-2 × Struggle Score × Daily Limit</code>
+              </p>
             </div>
 
-            <div
-              className="progress"
-              style={{
-                height: "10px",
-                backgroundColor: "#1E293B",
-              }}
-            >
-              <div
-                className="progress-bar"
-                role="progressbar"
-                style={{
-                  width: `${completionPercentage}%`,
-                  backgroundColor: COLORS.primary,
-                }}
-              />
-            </div>
-          </div>
-        )}
+            <div className="sp-actions">
+              <label className="sp-field">
+                <span>Daily limit</span>
+                <select
+                  className="sp-input"
+                  value={maxDailyMinutes}
+                  onChange={(e) => changeDailyLimit(Number(e.target.value))}
+                  disabled={loading}
+                >
+                  {[...new Set([...DAILY_LIMIT_OPTIONS, maxDailyMinutes])]
+                    .sort((a, b) => a - b)
+                    .map((m) => (
+                      <option key={m} value={m}>
+                        {formatMinutes(m)}
+                      </option>
+                    ))}
+                </select>
+              </label>
 
-        {/* ================================================== */}
-        {/* TODAY'S / SELECTED DATE SCHEDULE */}
-        {/* ================================================== */}
-
-        <div
-          className="rounded-4 mb-4 overflow-hidden"
-          style={{
-            backgroundColor: COLORS.card,
-            border: `1px solid ${COLORS.border}`,
-          }}
-        >
-
-          <div
-            className="p-4"
-            style={{
-              backgroundColor: COLORS.secondary,
-              borderBottom: `1px solid ${COLORS.border}`,
-            }}
-          >
-            <h4 className="fw-bold mb-1">
-              📅 Schedule for {formatDate(selectedDate)}
-            </h4>
-
-            <small
-              style={{
-                color: "#BFDBFE",
-              }}
-            >
-              Dynamically generated from your revision plan
-            </small>
-          </div>
-
-          <div className="p-4">
-
-            {loading ? (
-
-              <div className="text-center py-5">
-
-                <div
-                  className="spinner-border"
-                  style={{
-                    color: COLORS.primary,
-                  }}
-                  role="status"
+              <label className="sp-field">
+                <span>Date</span>
+                <input
+                  type="date"
+                  className="sp-input"
+                  value={selectedDate}
+                  onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
                 />
+              </label>
 
-                <p
-                  className="mt-3 mb-0"
-                  style={{
-                    color: COLORS.muted,
-                  }}
-                >
-                  Loading your study plan...
-                </p>
+              <button
+                type="button"
+                className="sp-btn-secondary"
+                onClick={() => setShowInfo((v) => !v)}
+              >
+                <i className="bi bi-info-circle me-1" /> How it works
+              </button>
 
+              <button
+                type="button"
+                className="sp-btn-primary"
+                onClick={fetchPlan}
+                disabled={loading}
+              >
+                <i className={`bi bi-arrow-clockwise me-1 ${loading ? "sp-spin" : ""}`} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {showInfo && (
+            <div className="sp-info">
+              <div className="sp-info-head">
+                <i className="bi bi-cpu text-info me-2" />
+                <strong>How your plan is built</strong>
               </div>
-
-            ) : selectedTasks.length === 0 ? (
-
-              <div className="text-center py-5">
-
-                <div
-                  style={{
-                    fontSize: "50px",
-                    marginBottom: "15px",
-                  }}
-                >
-                  📖
+              <div className="sp-info-grid">
+                <div className="sp-info-item">
+                  <span className="sp-info-name">Weak topics first</span>
+                  <span className="sp-info-text">
+                    Topics from Top Struggles are added automatically, hardest first.
+                  </span>
                 </div>
-
-                <h5>
-                  No tasks scheduled
-                </h5>
-
-                <p
-                  style={{
-                    color: COLORS.muted,
-                  }}
-                >
-                  There are no revision tasks for this date.
-                </p>
-
+                <div className="sp-info-item">
+                  <span className="sp-info-name">Spaced repetition (SM-2)</span>
+                  <span className="sp-info-text">
+                    Mark a topic as revised and it returns after a growing gap: 1 day, 6 days, then longer.
+                  </span>
+                </div>
+                <div className="sp-info-item">
+                  <span className="sp-info-name">Daily limit</span>
+                  <span className="sp-info-text">
+                    Tasks overflowing your daily limit move to the next free day.
+                  </span>
+                </div>
               </div>
+            </div>
+          )}
 
-            ) : (
+          {actionError && (
+            <div className="sp-error sp-error-inline">
+              <i className="bi bi-exclamation-triangle-fill me-2" />
+              {actionError}
+            </div>
+          )}
 
-              <div className="d-flex flex-column gap-3">
-
-                {selectedTasks.map((task) => (
-
-                  <div
-                    key={task.id}
-                    className="p-3 rounded-4"
-                    style={{
-                      backgroundColor:
-                        COLORS.cardLight,
-
-                      border: task.completed
-                        ? "1px solid #2563EB"
-                        : `1px solid ${COLORS.border}`,
-                    }}
-                  >
-
-                    <div className="row align-items-center">
-
-                      {/* TASK INFORMATION */}
-                      <div className="col-md-8">
-
-                        <div className="d-flex gap-3 align-items-start">
-
-                          <div
-                            style={{
-                              fontSize: "30px",
-                              minWidth: "40px",
-                            }}
-                          >
-                            🔄
-                          </div>
-
-                          <div>
-
-                            <h5
-                              className="fw-bold mb-2"
-                              style={{
-                                textDecoration:
-                                  task.completed
-                                    ? "line-through"
-                                    : "none",
-
-                                color: task.completed
-                                  ? "#94A3B8"
-                                  : COLORS.text,
-                              }}
-                            >
-                              {task.topic}
-                            </h5>
-
-                            {task.subject && (
-                              <div
-                                className="mb-2"
-                                style={{
-                                  color: COLORS.muted,
-                                }}
-                              >
-                                📘 {task.subject}
-                              </div>
-                            )}
-
-                            <div className="d-flex flex-wrap gap-2">
-
-                              <span
-                                className="badge rounded-pill"
-                                style={{
-                                  backgroundColor:
-                                    COLORS.primary,
-                                }}
-                              >
-                                🔄 {task.taskType}
-                              </span>
-
-                              <span
-                                className="badge rounded-pill"
-                                style={{
-                                  backgroundColor:
-                                    getPriorityColor(
-                                      task.priority
-                                    ),
-                                }}
-                              >
-                                {task.priority} Priority
-                              </span>
-
-                              <span
-                                className="badge rounded-pill"
-                                style={{
-                                  backgroundColor:
-                                    COLORS.secondary,
-                                  color: "#BFDBFE",
-                                }}
-                              >
-                                ⏱ {task.duration} min
-                              </span>
-
-                            </div>
-
-                            {/* SM-2 INFORMATION */}
-                            <div
-                              className="mt-2 small"
-                              style={{
-                                color: COLORS.muted,
-                              }}
-                            >
-                              Revisions:{" "}
-                              {task.repetition}
-                              {" • "}
-                              Interval:{" "}
-                              {task.intervalDays} day
-                              {task.intervalDays !== 1
-                                ? "s"
-                                : ""}
-                              {" • "}
-                              Ease:{" "}
-                              {task.easeFactor}
-                            </div>
-
-                            {task.struggleScore > 0 && (
-                              <div
-                                className="small mt-1"
-                                style={{
-                                  color: "#93C5FD",
-                                }}
-                              >
-                                📊 Struggle Score:{" "}
-                                {task.struggleScore.toFixed(
-                                  2
-                                )}
-                              </div>
-                            )}
-
-                          </div>
-
-                        </div>
-
-                      </div>
-
-                      {/* COMPLETE BUTTON */}
-                      <div className="col-md-4 text-md-end mt-3 mt-md-0">
-
-                        {task.completed ? (
-
-                          <span
-                            className="badge rounded-pill px-3 py-2"
-                            style={{
-                              backgroundColor:
-                                "#1D4ED8",
-                              color: "white",
-                            }}
-                          >
-                            ✓ Completed
-                          </span>
-
-                        ) : (
-
-                          <button
-                            className="btn rounded-pill px-4"
-                            onClick={() =>
-                              completeTask(task.id)
-                            }
-                            disabled={
-                              completingTask === task.id
-                            }
-                            style={{
-                              backgroundColor:
-                                COLORS.primary,
-                              color: "white",
-                              border: "none",
-                            }}
-                          >
-                            {completingTask === task.id
-                              ? "Updating..."
-                              : "✓ Complete"}
-                          </button>
-
-                        )}
-
-                      </div>
-
-                    </div>
-
+          {loading && !hasAnyTasks ? (
+            <div className="sp-state">
+              <div className="spinner-border text-info" role="status" style={{ width: 32, height: 32 }}>
+                <span className="visually-hidden">Loading...</span>
+              </div>
+              <p className="mt-3 sp-muted">Building your revision schedule...</p>
+            </div>
+          ) : error ? (
+            <div className="sp-error">
+              <i className="bi bi-exclamation-triangle-fill me-2" />
+              {error}
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-danger ms-3"
+                onClick={fetchPlan}
+              >
+                Retry
+              </button>
+            </div>
+          ) : !hasAnyTasks ? (
+            <div className="sp-state">
+              <i className="bi bi-journal-check text-info" style={{ fontSize: 34 }} />
+              <h5 className="mt-2 text-light">No revision tasks yet</h5>
+              <p className="sp-muted mb-3">
+                Take a practice test and your weak topics will be scheduled here automatically.
+              </p>
+              <button type="button" className="sp-btn-primary" onClick={() => navigate("/test")}>
+                <i className="bi bi-lightning-charge-fill me-1" /> Take a practice test
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* ---------- stats ---------- */}
+              <div className="sp-stats">
+                <div className="sp-stat">
+                  <span className="sp-stat-label">
+                    <i className="bi bi-list-task me-1" /> Tasks
+                  </span>
+                  <span className="sp-stat-value">{dayTasks.length}</span>
+                  <span className="sp-stat-sub">{isToday ? "for today" : "on this day"}</span>
+                </div>
+                <div className="sp-stat">
+                  <span className="sp-stat-label">
+                    <i className="bi bi-check2-circle me-1" /> Completed
+                  </span>
+                  <span className="sp-stat-value" style={{ color: "#34d399" }}>{completedCount}</span>
+                  <div className="sp-track">
+                    <div className="sp-fill" style={{ width: `${completionPct}%`, background: "#34d399" }} />
                   </div>
-
-                ))}
-
-              </div>
-
-            )}
-
-          </div>
-
-        </div>
-
-        {/* ================================================== */}
-        {/* UPCOMING REVISION */}
-        {/* ================================================== */}
-
-        <div
-          className="rounded-4 overflow-hidden"
-          style={{
-            backgroundColor: COLORS.card,
-            border: `1px solid ${COLORS.border}`,
-          }}
-        >
-
-          <div
-            className="p-4"
-            style={{
-              backgroundColor: COLORS.secondary,
-              borderBottom: `1px solid ${COLORS.border}`,
-            }}
-          >
-
-            <h4 className="fw-bold mb-1">
-              🔄 Upcoming Revision
-            </h4>
-
-            <small
-              style={{
-                color: "#BFDBFE",
-              }}
-            >
-              Next revision tasks calculated by SM-2
-            </small>
-
-          </div>
-
-          <div className="p-4">
-
-            {upcomingTasks.length === 0 ? (
-
-              <div className="text-center py-4">
-
-                <div
-                  style={{
-                    fontSize: "40px",
-                  }}
-                >
-                  📚
                 </div>
-
-                <p
-                  className="mt-2 mb-0"
-                  style={{
-                    color: COLORS.muted,
-                  }}
-                >
-                  No upcoming revision tasks.
-                </p>
-
-              </div>
-
-            ) : (
-
-              <div className="row g-3">
-
-                {upcomingTasks.map((task) => (
-
-                  <div
-                    className="col-md-6"
-                    key={task.id}
-                  >
-
+                <div className="sp-stat">
+                  <span className="sp-stat-label">
+                    <i className="bi bi-hourglass-split me-1" /> Pending
+                  </span>
+                  <span className="sp-stat-value" style={{ color: "#fbbf24" }}>{pendingTasks.length}</span>
+                  <span className="sp-stat-sub">still to revise</span>
+                </div>
+                <div className="sp-stat">
+                  <span className="sp-stat-label">
+                    <i className="bi bi-stopwatch me-1" /> Study time
+                  </span>
+                  <span className="sp-stat-value">{formatMinutes(pendingMinutes)}</span>
+                  <div className="sp-track">
                     <div
-                      className="p-3 rounded-4 h-100"
-                      style={{
-                        backgroundColor:
-                          COLORS.cardLight,
-
-                        border:
-                          `1px solid ${COLORS.border}`,
-                      }}
-                    >
-
-                      <div className="d-flex justify-content-between">
-
-                        <div>
-
-                          <h5 className="fw-bold">
-                            {task.topic}
-                          </h5>
-
-                          {task.subject && (
-                            <p
-                              className="mb-2"
-                              style={{
-                                color:
-                                  COLORS.muted,
-                              }}
-                            >
-                              📘 {task.subject}
-                            </p>
-                          )}
-
-                          <p
-                            className="mb-2"
-                            style={{
-                              color:
-                                COLORS.muted,
-                            }}
-                          >
-                            📅{" "}
-                            {formatDate(
-                              task.scheduledDate
-                            )}
-                          </p>
-
-                          <div className="d-flex flex-wrap gap-2">
-
-                            <span
-                              className="badge rounded-pill"
-                              style={{
-                                backgroundColor:
-                                  COLORS.primary,
-                              }}
-                            >
-                              🔄 {task.taskType}
-                            </span>
-
-                            <span
-                              className="badge rounded-pill"
-                              style={{
-                                backgroundColor:
-                                  getPriorityColor(
-                                    task.priority
-                                  ),
-                              }}
-                            >
-                              {task.priority}
-                            </span>
-
-                            <span
-                              className="badge rounded-pill"
-                              style={{
-                                backgroundColor:
-                                  COLORS.secondary,
-                                color: "#BFDBFE",
-                              }}
-                            >
-                              ⏱ {task.duration} min
-                            </span>
-
-                          </div>
-
-                          <div
-                            className="small mt-2"
-                            style={{
-                              color:
-                                COLORS.muted,
-                            }}
-                          >
-                            🔁 Repetition:{" "}
-                            {task.repetition}
-                            {" • "}
-                            📅 Every{" "}
-                            {task.intervalDays} day
-                            {task.intervalDays !== 1
-                              ? "s"
-                              : ""}
-                          </div>
-
-                        </div>
-
-                        <div
-                          style={{
-                            fontSize: "28px",
-                          }}
-                        >
-                          📚
-                        </div>
-
-                      </div>
-
-                    </div>
-
+                      className="sp-fill"
+                      style={{ width: `${loadPct}%`, background: loadPct >= 100 ? "#f59e0b" : "#38bdf8" }}
+                    />
                   </div>
-
-                ))}
-
+                  <span className="sp-stat-sub">of {formatMinutes(maxDailyMinutes)} daily limit</span>
+                </div>
               </div>
 
+              {/* ---------- week strip ---------- */}
+              <div className="sp-week">
+                {weekStrip.map((day) => (
+                  <button
+                    type="button"
+                    key={day.key}
+                    className={`sp-day ${day.key === selectedDate ? "sp-day-active" : ""}`}
+                    onClick={() => setSelectedDate(day.key)}
+                  >
+                    <span className="sp-day-name">
+                      {day.key === todayKey
+                        ? "Today"
+                        : parseDateKey(day.key).toLocaleDateString("en-IN", { weekday: "short" })}
+                    </span>
+                    <span className="sp-day-num">{parseDateKey(day.key).getDate()}</span>
+                    <span className="sp-day-meta">
+                      {day.count ? `${day.count} topic${day.count > 1 ? "s" : ""}` : "Free"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {/* ---------- selected day ---------- */}
+              <div className="sp-section-head">
+                <i className="bi bi-calendar-event me-2" />
+                {relativeDayLabel(selectedDate, todayKey)} · {formatLongDate(selectedDate)}
+              </div>
+
+              {dayTasks.length === 0 ? (
+                <div className="sp-state sp-state-small">
+                  <i className="bi bi-cup-hot text-success" style={{ fontSize: 28 }} />
+                  <h6 className="mt-2 text-light">Nothing scheduled</h6>
+                  <p className="sp-muted mb-0">
+                    {upcomingTasks.length > 0 && selectedDate <= todayKey
+                      ? `You're all caught up. Next revision: ${relativeDayLabel(upcomingTasks[0].scheduledDate, todayKey)}.`
+                      : "No revision tasks on this day."}
+                  </p>
+                </div>
+              ) : (
+                <div className="sp-list">
+                  {dayTasks.map((task, index) => {
+                    const style = priorityStyle(task.priority);
+                    const busy = busyTask === task.id;
+                    const scorePct = Math.max(4, Math.min(100, Math.round((task.struggleScore / 1.5) * 100)));
+
+                    return (
+                      <div
+                        className={`sp-item ${task.completed ? "sp-item-done" : ""}`}
+                        key={`${task.id}-${task.completed ? "d" : "p"}`}
+                      >
+                        <div className="sp-rank" style={{ borderColor: style.border, color: style.color }}>
+                          {task.completed ? <i className="bi bi-check-lg" /> : `#${index + 1}`}
+                        </div>
+
+                        <div className="sp-info-col">
+                          <div className="sp-title-row">
+                            <span className="sp-topic">{task.topic}</span>
+                            <span className="sp-pill">{task.subject}</span>
+                            {task.completed ? (
+                              <span
+                                className="sp-badge-sm"
+                                style={{ color: "#34d399", background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.35)" }}
+                              >
+                                Revised today
+                              </span>
+                            ) : (
+                              <span
+                                className="sp-badge-sm"
+                                style={{ color: style.color, background: style.bg, border: `1px solid ${style.border}` }}
+                              >
+                                {style.label}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="sp-progress-row">
+                            <div className="sp-progress-info">
+                              <span>Struggle score: {task.struggleScore.toFixed(2)}</span>
+                              <span className="sp-muted">~{formatMinutes(task.duration)}</span>
+                            </div>
+                            <div className="sp-track sp-track-lg">
+                              <div className="sp-fill" style={{ width: `${scorePct}%`, background: style.bar }} />
+                            </div>
+                          </div>
+
+                          <div className="sp-metrics">
+                            <span>Review <strong>#{task.repetition + 1}</strong></span>
+                            <span>Interval <strong>{task.intervalDays}d</strong></span>
+                            <span>Ease <strong>{task.easeFactor.toFixed(2)}</strong></span>
+                          </div>
+                        </div>
+
+                        {!task.completed && (
+                          <div className="sp-action-col">
+                            <button
+                              type="button"
+                              className="sp-btn-go"
+                              disabled={busy}
+                              onClick={() => reviewTask(task, 5)}
+                            >
+                              <i className="bi bi-check2-circle me-1" />
+                              {busy ? "Saving..." : "Revised"}
+                            </button>
+                            <button
+                              type="button"
+                              className="sp-btn-ghost"
+                              disabled={busy}
+                              onClick={() => reviewTask(task, 2)}
+                              title="Still hard - you'll see it again tomorrow"
+                            >
+                              Still hard
+                            </button>
+                            <button
+                              type="button"
+                              className="sp-btn-ghost"
+                              onClick={() => practiceTopic(task)}
+                            >
+                              <i className="bi bi-lightning-charge-fill me-1" />
+                              Practice
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ============ UPCOMING CARD ============ */}
+        {!error && hasAnyTasks && (
+          <div className="sp-card">
+            <div className="sp-header sp-header-tight">
+              <div>
+                <div className="sp-badge">
+                  <span className="sp-dot" />
+                  Coming up
+                </div>
+                <h3 className="sp-title">Upcoming Revisions</h3>
+                <p className="sp-desc">
+                  {upcomingTasks.length
+                    ? `${upcomingTasks.length} topic${upcomingTasks.length > 1 ? "s" : ""} scheduled over the next ${upcomingByDate.length} day${upcomingByDate.length > 1 ? "s" : ""}.`
+                    : "Nothing scheduled yet."}
+                </p>
+              </div>
+            </div>
+
+            {upcomingByDate.length === 0 ? (
+              <div className="sp-state sp-state-small">
+                <i className="bi bi-calendar-check text-success" style={{ fontSize: 28 }} />
+                <p className="sp-muted mt-2 mb-0">
+                  Everything is scheduled for today. Finish it and your next reviews will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="sp-upcoming">
+                {upcomingByDate.map(([dateKey, tasks]) => (
+                  <div className="sp-group" key={dateKey}>
+                    <button
+                      type="button"
+                      className="sp-group-head"
+                      onClick={() => {
+                        setSelectedDate(dateKey);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      title="Open this day"
+                    >
+                      <span>
+                        <strong>{relativeDayLabel(dateKey, todayKey)}</strong>
+                        <span className="sp-muted"> · {formatLongDate(dateKey)}</span>
+                      </span>
+                      <span className="sp-muted">
+                        {tasks.length} topic{tasks.length > 1 ? "s" : ""} ·{" "}
+                        {formatMinutes(tasks.reduce((s, t) => s + t.duration, 0))}
+                      </span>
+                    </button>
+
+                    {tasks.map((task) => {
+                      const style = priorityStyle(task.priority);
+                      return (
+                        <div className="sp-up-row" key={task.id}>
+                          <span className="sp-up-dot" style={{ background: style.bar }} />
+                          <span className="sp-up-topic">{task.topic}</span>
+                          <span className="sp-pill">{task.subject}</span>
+                          <span className="sp-up-meta">
+                            {task.repetition > 0 ? `Review #${task.repetition + 1}` : "First review"}
+                            {" · "}
+                            {formatMinutes(task.duration)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
             )}
-
           </div>
-
-        </div>
-
-        {/* ================================================== */}
-        {/* REFRESH */}
-        {/* ================================================== */}
-
-        <div className="text-center mt-4">
-
-          <button
-            className="btn rounded-pill px-4"
-            onClick={fetchTasks}
-            disabled={loading}
-            style={{
-              backgroundColor:
-                COLORS.secondary,
-              color: "#DBEAFE",
-              border:
-                "1px solid #2563EB",
-            }}
-          >
-            🔄 Refresh Planner
-          </button>
-
-        </div>
-
+        )}
       </div>
+
+      <style>{`
+        .sp-page {
+          min-height: 100vh;
+          background: #0b1220;
+          color: #f8fafc;
+          padding: 24px 16px 48px;
+        }
+        .sp-container { max-width: 1100px; margin: 0 auto; }
+
+        .sp-card {
+          background: #0F172A;
+          border: 1px solid #1E293B;
+          border-radius: 20px;
+          padding: 24px;
+          color: #f8fafc;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+          margin-bottom: 24px;
+        }
+        .sp-header {
+          display: flex; justify-content: space-between; align-items: flex-start;
+          flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
+        }
+        .sp-header-tight { margin-bottom: 12px; }
+        .sp-badge {
+          display: inline-flex; align-items: center; gap: 8px;
+          background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25);
+          border-radius: 20px; padding: 4px 12px; font-size: 12px; font-weight: 600;
+          color: #38bdf8; margin-bottom: 8px;
+        }
+        .sp-dot {
+          width: 8px; height: 8px; border-radius: 50%; background: #38bdf8;
+          box-shadow: 0 0 8px #38bdf8; animation: sp-pulse 2s infinite;
+        }
+        @keyframes sp-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.85); } }
+        .sp-title { font-size: 22px; font-weight: 700; color: #fff; margin: 0 0 4px; }
+        .sp-desc { color: #94a3b8; font-size: 13px; margin: 0; }
+        .sp-desc code {
+          background: rgba(30, 41, 59, 0.8); color: #38bdf8; padding: 2px 6px;
+          border-radius: 6px; font-size: 12px;
+        }
+        .sp-muted { color: #94a3b8; }
+
+        .sp-actions { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+        .sp-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #94a3b8; margin: 0; }
+        .sp-input {
+          background: #1E293B; border: 1px solid #334155; color: #e2e8f0;
+          font-size: 13px; padding: 7px 10px; border-radius: 10px; color-scheme: dark;
+        }
+        .sp-input:focus { outline: none; border-color: #38bdf8; }
+        .sp-btn-secondary {
+          background: #1E293B; border: 1px solid #334155; color: #cbd5e1; font-size: 13px;
+          font-weight: 500; padding: 8px 14px; border-radius: 10px; cursor: pointer; transition: all .2s;
+        }
+        .sp-btn-secondary:hover { background: #334155; color: #fff; }
+        .sp-btn-primary {
+          background: #0284c7; border: 1px solid #0369a1; color: #fff; font-size: 13px;
+          font-weight: 600; padding: 8px 16px; border-radius: 10px; cursor: pointer;
+          transition: all .2s; display: inline-flex; align-items: center;
+        }
+        .sp-btn-primary:hover:not(:disabled) { background: #0369a1; }
+        .sp-btn-primary:disabled { opacity: .6; cursor: not-allowed; }
+        .sp-spin { animation: sp-rot 1s linear infinite; display: inline-block; }
+        @keyframes sp-rot { to { transform: rotate(360deg); } }
+
+        .sp-info {
+          background: rgba(15, 23, 42, 0.8); border: 1px solid #1E293B; border-left: 4px solid #38bdf8;
+          border-radius: 12px; padding: 16px; margin-bottom: 20px; font-size: 13px;
+        }
+        .sp-info-head { display: flex; align-items: center; color: #e2e8f0; margin-bottom: 10px; }
+        .sp-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+        .sp-info-item { background: rgba(30, 41, 59, 0.5); border-radius: 8px; padding: 10px; }
+        .sp-info-name { display: block; font-weight: 600; color: #f1f5f9; font-size: 12px; margin-bottom: 2px; }
+        .sp-info-text { color: #94a3b8; font-size: 12px; line-height: 1.4; }
+
+        .sp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 18px; }
+        .sp-stat {
+          background: #131E32; border: 1px solid #1E293B; border-radius: 14px; padding: 14px 16px;
+          display: flex; flex-direction: column; gap: 4px;
+        }
+        .sp-stat-label { font-size: 12px; color: #94a3b8; }
+        .sp-stat-value { font-size: 26px; font-weight: 700; color: #f8fafc; line-height: 1.1; }
+        .sp-stat-sub { font-size: 11px; color: #94a3b8; }
+
+        .sp-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-bottom: 22px; }
+        .sp-day {
+          background: #131E32; border: 1px solid #1E293B; border-radius: 12px; padding: 10px 6px;
+          display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
+          color: #cbd5e1; transition: all .2s;
+        }
+        .sp-day:hover { border-color: #38bdf8; transform: translateY(-2px); }
+        .sp-day-active { border-color: #38bdf8; background: rgba(56, 189, 248, 0.12); color: #fff; }
+        .sp-day-name { font-size: 11px; color: #94a3b8; }
+        .sp-day-active .sp-day-name { color: #7dd3fc; }
+        .sp-day-num { font-size: 18px; font-weight: 700; }
+        .sp-day-meta { font-size: 10px; color: #94a3b8; }
+
+        .sp-section-head { font-size: 15px; font-weight: 600; color: #e2e8f0; margin-bottom: 12px; }
+
+        .sp-list { display: flex; flex-direction: column; gap: 12px; }
+        .sp-item {
+          display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-radius: 14px;
+          background: #131E32; border: 1px solid #1E293B;
+          transition: transform .2s, border-color .2s, box-shadow .2s;
+        }
+        .sp-item:hover { transform: translateY(-2px); border-color: #38bdf8; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+        .sp-item-done { opacity: .72; }
+        .sp-rank {
+          flex-shrink: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+          border-radius: 10px; background: rgba(15, 23, 42, .9); border: 1px solid; font-weight: 700; font-size: 14px;
+        }
+        .sp-info-col { flex: 1; min-width: 0; }
+        .sp-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        .sp-topic { font-size: 16px; font-weight: 600; color: #f8fafc; }
+        .sp-pill {
+          background: #1E293B; border: 1px solid #334155; color: #94a3b8; font-size: 11px; font-weight: 500;
+          padding: 2px 8px; border-radius: 6px; text-transform: uppercase; letter-spacing: .05em;
+        }
+        .sp-badge-sm { font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 20px; }
+        .sp-progress-row { margin-bottom: 8px; }
+        .sp-progress-info { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; color: #cbd5e1; }
+        .sp-track { width: 100%; height: 6px; background: #0B1120; border-radius: 999px; overflow: hidden; }
+        .sp-track-lg { height: 6px; }
+        .sp-fill { height: 100%; border-radius: 999px; transition: width .4s ease; }
+        .sp-metrics { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: #94a3b8; }
+        .sp-metrics strong { color: #f1f5f9; }
+
+        .sp-action-col { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
+        .sp-btn-go {
+          background: linear-gradient(135deg, #059669, #047857); border: 1px solid #34d399; color: #fff;
+          font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 10px; cursor: pointer;
+          white-space: nowrap; transition: all .2s;
+        }
+        .sp-btn-go:hover:not(:disabled) { transform: scale(1.02); box-shadow: 0 4px 12px rgba(52, 211, 153, .35); }
+        .sp-btn-go:disabled { opacity: .6; cursor: wait; }
+        .sp-btn-ghost {
+          background: #1E293B; border: 1px solid #334155; color: #cbd5e1; font-size: 12px;
+          padding: 6px 12px; border-radius: 10px; cursor: pointer; white-space: nowrap; transition: all .2s;
+        }
+        .sp-btn-ghost:hover:not(:disabled) { background: #334155; color: #fff; }
+
+        .sp-state { padding: 40px 20px; text-align: center; }
+        .sp-state-small { padding: 24px 16px; background: #131E32; border: 1px dashed #334155; border-radius: 14px; }
+        .sp-error {
+          background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: 12px; color: #fca5a5; font-size: 14px; padding: 16px 20px;
+        }
+        .sp-error-inline { margin-bottom: 16px; padding: 10px 14px; font-size: 13px; }
+
+        .sp-upcoming { display: flex; flex-direction: column; gap: 14px; }
+        .sp-group { background: #131E32; border: 1px solid #1E293B; border-radius: 14px; overflow: hidden; }
+        .sp-group-head {
+          width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+          background: rgba(30, 41, 59, 0.55); border: 0; border-bottom: 1px solid #1E293B;
+          color: #f1f5f9; font-size: 13px; padding: 10px 16px; cursor: pointer; text-align: left;
+        }
+        .sp-group-head:hover { background: rgba(56, 189, 248, 0.12); }
+        .sp-up-row {
+          display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px;
+          border-top: 1px solid rgba(30, 41, 59, .7);
+        }
+        .sp-up-row:first-of-type { border-top: 0; }
+        .sp-up-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .sp-up-topic { font-size: 14px; font-weight: 600; color: #f8fafc; }
+        .sp-up-meta { margin-left: auto; font-size: 12px; color: #94a3b8; }
+
+        @media (max-width: 768px) {
+          .sp-item { flex-direction: column; align-items: flex-start; }
+          .sp-action-col { width: 100%; flex-direction: row; flex-wrap: wrap; }
+          .sp-action-col button { flex: 1; }
+          .sp-week { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -55,6 +55,30 @@ def _add_missing_columns(engine, Base):
     return added
 
 
+def _relax_legacy_columns(engine, Base):
+    """
+    Columns that exist in an old database but no longer in the models (e.g. a
+    renamed `scheduled_date`) may be NOT NULL without a default, which makes
+    every INSERT fail. Make them nullable so old databases keep working.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    relaxed = []
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue
+            wanted = {c.name for c in table.columns}
+            for col in inspector.get_columns(table.name):
+                if col["name"] in wanted or col["nullable"] or col.get("default") is not None:
+                    continue
+                if col.get("autoincrement") or col.get("identity"):
+                    continue
+                conn.execute(text(f'ALTER TABLE "{table.name}" ALTER COLUMN "{col["name"]}" DROP NOT NULL'))
+                relaxed.append(f"{table.name}.{col['name']}")
+    return relaxed
+
+
 def init_database(engine, Base):
     # 1. pgvector (needs a pgvector-enabled Postgres, e.g. the pgvector/pgvector Docker image)
     try:
@@ -71,6 +95,9 @@ def init_database(engine, Base):
     added = _add_missing_columns(engine, Base)
     if added:
         logger.info("Database upgraded - added columns: %s", ", ".join(added))
+    relaxed = _relax_legacy_columns(engine, Base)
+    if relaxed:
+        logger.info("Relaxed legacy NOT NULL columns: %s", ", ".join(relaxed))
 
     # 4. vector index for fast RAG retrieval
     try:

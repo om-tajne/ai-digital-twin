@@ -848,6 +848,19 @@ const STYLES = `
 .text-red-400 { color: #F87171 !important; }
 .font-mono { font-family: 'JetBrains Mono', monospace; }
 
+/* Contrast fixes: Bootstrap's default muted/secondary grays are unreadable on this dark theme */
+.po-root .text-muted,
+.po-root .text-secondary,
+.po-root .text-body-secondary { color: #94A3B8 !important; }
+.po-root label,
+.po-root small,
+.po-root .small { color: #CBD5E1; }
+.po-root h1, .po-root h2, .po-root h3, .po-root h4, .po-root h5, .po-root h6 { color: #F8FAFC; }
+.po-root .po-card-title { color: #F8FAFC; }
+.po-root p { color: inherit; }
+.po-root .text-muted svg { color: inherit; }
+.po-root .form-select { color-scheme: dark; }
+
 .guardian-portal-bar {
   background: rgba(30, 41, 59, 0.7);
   backdrop-filter: blur(12px);

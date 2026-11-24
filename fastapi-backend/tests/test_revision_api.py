@@ -258,3 +258,72 @@ def test_review_invalid_schedule_id_returns_current_status(student):
     )
     print("DEBUG invalid schedule_id response:", resp.status_code, resp.text)
     assert resp.status_code == 500  # current behavior — see docstring
+
+
+# ============================================================
+# Regression: duplicate topics used to crash the plan (HTTP 500)
+# ============================================================
+
+def _add_mastery(db, student_id, subject, topic, score):
+    db.add(StudentMastery(
+        student_id=student_id, subject=subject, topic=topic,
+        correct_answers=1, total_questions=5, mastery_score=score,
+    ))
+
+
+def test_plan_survives_duplicate_topics(student):
+    """Same topic under blank / 'General' / differently cased subjects must not 500."""
+    db = SessionLocal()
+    try:
+        _add_mastery(db, student, "General", "Dynamic Programming", 0.12)
+        _add_mastery(db, student, "general ", "dynamic  programming", 0.15)
+        _add_mastery(db, student, "", "Dynamic Programming", 0.2)
+        _add_mastery(db, student, "General", "Huffman Coding", 0.18)
+        db.commit()
+    finally:
+        db.close()
+
+    # call repeatedly - the crash happened on the second load
+    for _ in range(3):
+        resp = client.get(f"{API}/revision/{student}/plan")
+        assert resp.status_code == 200, resp.text
+
+    topics = [t["topic"].lower() for t in resp.json()["all_tasks"]]
+    assert topics.count("dynamic programming") == 1
+    assert "huffman coding" in topics
+
+
+def test_reviewed_task_comes_back_when_due(student):
+    """A COMPLETED task whose interval elapsed must be PENDING again."""
+    db = SessionLocal()
+    try:
+        _add_mastery(db, student, "General", "Paging", 0.3)
+        db.commit()
+    finally:
+        db.close()
+
+    plan = client.get(f"{API}/revision/{student}/plan").json()
+    task = plan["today_tasks"][0]
+    client.post(f"{API}/revision/{student}/review",
+                json={"schedule_id": task["schedule_id"], "quality_score": 5})
+
+    after = client.get(f"{API}/revision/{student}/plan").json()
+    assert after["completed_today_count"] == 1
+    assert all(t["topic"] != "Paging" for t in after["today_tasks"])
+
+    db = SessionLocal()
+    try:
+        db.query(RevisionSchedule).filter(
+            RevisionSchedule.student_id == student
+        ).update({"next_review_date": date.today()})
+        db.commit()
+    finally:
+        db.close()
+
+    due = client.get(f"{API}/revision/{student}/plan").json()
+    assert any(t["topic"] == "Paging" for t in due["today_tasks"])
+
+
+def test_plan_unknown_student_is_404():
+    resp = client.get(f"{API}/revision/{uuid.uuid4()}/plan")
+    assert resp.status_code == 404
