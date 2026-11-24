@@ -1,12 +1,19 @@
-import { useContext, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
+import { FASTAPI_API_URL } from "../config";
 import "./Header.css";
 
 const Header = () => {
   const { user, logout } = useContext(AuthContext);
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [topics, setTopics] = useState([]);
+  const searchRef = useRef(null);
 
   const navLinks = [
     { path: "/", label: "Home", icon: "bi-house-door" },
@@ -18,6 +25,94 @@ const Header = () => {
     { path: "/parents-dashboard", label: "Parents Dashboard", icon: "bi-people" },
     { path: "/student-profile", label: "Student Profile", icon: "bi-person-circle" },
   ];
+
+  const studentId = user?.student_id || user?.id;
+
+  // Load the student's topics once so search can jump straight to practice
+  useEffect(() => {
+    if (!studentId || !searchOpen) return;
+    let cancelled = false;
+    fetch(`${FASTAPI_API_URL}/mastery/${studentId}`)
+      .then((r) => (r.ok ? r.json() : { mastery: [] }))
+      .then((d) => {
+        if (!cancelled) setTopics(Array.isArray(d?.mastery) ? d.mastery : []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId, searchOpen]);
+
+  useEffect(() => {
+    const close = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+
+    const pageHits = navLinks
+      .filter((l) => l.label.toLowerCase().includes(q))
+      .map((l) => ({
+        key: `page-${l.path}`,
+        icon: l.icon,
+        label: l.label,
+        hint: "Page",
+        go: () => navigate(l.path),
+      }));
+
+    const seen = new Set();
+    const topicHits = topics
+      .filter((t) => (t.topic || "").toLowerCase().includes(q))
+      .filter((t) => {
+        const k = (t.topic || "").toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .slice(0, 6)
+      .map((t) => ({
+        key: `topic-${t.mastery_id}`,
+        icon: "bi-lightning-charge-fill",
+        label: `Practice ${t.topic}`,
+        hint: `${Math.round(t.percentage ?? 0)}% mastery`,
+        go: () =>
+          navigate(
+            `/test?topic=${encodeURIComponent(t.topic)}&subject=${encodeURIComponent(
+              t.subject || "General"
+            )}`
+          ),
+      }));
+
+    return [...pageHits, ...topicHits];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, topics]);
+
+  const runResult = (item) => {
+    if (!item) return;
+    item.go();
+    setQuery("");
+    setSearchOpen(false);
+    setIsMobileMenuOpen(false);
+  };
+
+  const onSearchKeyDown = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, Math.max(results.length - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Escape") {
+      setSearchOpen(false);
+    }
+  };
 
   return (
     <header className="header-navbar sticky-top">
@@ -70,15 +165,54 @@ const Header = () => {
             <div className="header-right-actions">
               
               {/* Search Bar */}
-              <form className="header-search-form" onSubmit={(e) => e.preventDefault()}>
+              <form
+                className="header-search-form"
+                ref={searchRef}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  runResult(results[activeIndex] || results[0]);
+                }}
+              >
                 <div className="search-input-wrapper">
                   <i className="bi bi-search search-icon"></i>
                   <input
                     type="search"
                     className="form-control header-search-input"
-                    placeholder="Search..."
+                    placeholder="Search pages & topics..."
+                    value={query}
+                    autoComplete="off"
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setActiveIndex(0);
+                      setSearchOpen(true);
+                    }}
+                    onFocus={() => setSearchOpen(true)}
+                    onKeyDown={onSearchKeyDown}
                   />
                 </div>
+
+                {searchOpen && query.trim() && (
+                  <ul className="header-search-results">
+                    {results.length === 0 ? (
+                      <li className="header-search-empty">No matches for "{query.trim()}"</li>
+                    ) : (
+                      results.map((item, i) => (
+                        <li key={item.key}>
+                          <button
+                            type="button"
+                            className={`header-search-item ${i === activeIndex ? "active" : ""}`}
+                            onMouseEnter={() => setActiveIndex(i)}
+                            onClick={() => runResult(item)}
+                          >
+                            <i className={`bi ${item.icon}`}></i>
+                            <span className="hs-label">{item.label}</span>
+                            <span className="hs-hint">{item.hint}</span>
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                )}
               </form>
 
               {/* User Authentication Actions */}

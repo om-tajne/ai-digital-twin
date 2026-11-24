@@ -859,6 +859,7 @@ export default function TestPage() {
     targetTopic ? 'loading' : 'idle'
   )
   const [targetError, setTargetError] = useState('')
+  const [masterySaveError, setMasterySaveError] = useState('')
   const targetRunKey = useRef('')
 
   const [sessionState, setSessionState] =
@@ -1325,6 +1326,7 @@ export default function TestPage() {
 
   const resetToSetup = () => {
     targetRunKey.current = ''
+    setMasterySaveError('')
     setTargetStatus('idle')
     setSearchParams({}, { replace: true })
     setSessionState('setup')
@@ -1406,54 +1408,69 @@ export default function TestPage() {
       return;
     }
 
-    const studentId = user.student_id || user.id;
+    await saveMasteryUpdates(
+      result.breakdown.map((item) => ({
+        subject: item.subjectName || "General",
+        topic: item.category || "General",
+        isCorrect: Boolean(item.isCorrect),
+      }))
+    );
+  };
+
+  // Sends one mastery update per answered question; Top Struggles, the Study
+  // Planner and Topic Mastery are all computed from these rows.
+  const saveMasteryUpdates = async (items) => {
+    const studentId = user?.student_id || user?.id;
+    if (!studentId || !items.length) return;
+
     setSubmitting(true);
+    setMasterySaveError("");
 
     try {
-      // Parallel mastery updates across topics
-      const masteryPromises = result.breakdown.map(async (item) => {
-        const subject = item.subjectName || "General";
-        const topic = item.category || "General";
+      // Sequential per topic order doesn't matter, but parallel writes to the
+      // same (subject, topic) row can race, so send them one after another.
+      const masteryMap = {};
+      let failed = 0;
 
+      for (const item of items) {
         try {
-          const response = await fetch(
-            `${API_URL}/api/v1/mastery/update`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                student_id: studentId,
-                subject: subject,
-                topic: topic,
-                is_correct: Boolean(item.isCorrect),
-              }),
-            }
-          );
+          const response = await fetch(`${API_URL}/api/v1/mastery/update`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              student_id: studentId,
+              subject: item.subject,
+              topic: item.topic,
+              is_correct: item.isCorrect,
+            }),
+          });
 
           if (response.ok) {
-            const masteryData = await response.json();
-            return { key: `${subject}-${topic}`, data: masteryData };
+            const data = await response.json();
+            masteryMap[`${item.subject}-${item.topic}`] = data;
+          } else {
+            failed += 1;
+            console.error("Mastery update failed:", response.status, await response.text());
           }
         } catch (err) {
-          console.error(`Failed to update mastery for ${subject} -> ${topic}:`, err);
+          failed += 1;
+          console.error(`Failed to update mastery for ${item.subject} -> ${item.topic}:`, err);
         }
-        return null;
-      });
-
-      const settled = await Promise.all(masteryPromises);
-      const masteryMap = {};
-      settled.filter(Boolean).forEach(({ key, data }) => {
-        masteryMap[key] = data;
-      });
+      }
 
       const allMasteryResults = Object.values(masteryMap);
       if (allMasteryResults.length > 0) {
         setMasteryResult(allMasteryResults);
       }
+
+      if (failed > 0) {
+        setMasterySaveError(
+          `Your result was not fully saved (${failed} of ${items.length} updates failed), so Top Struggles, Study Planner and Topic Mastery may not reflect this test. Check that the backend is running.`
+        );
+      }
     } catch (error) {
       console.error("Mastery processing failed:", error);
+      setMasterySaveError("Your result could not be saved to your mastery profile.");
     } finally {
       setSubmitting(false);
     }
@@ -1485,6 +1502,18 @@ export default function TestPage() {
     setVivaResults(result)
     setSessionCompletedAt(completedAt)
     setSessionState('results')
+
+    // Viva answers are not auto-graded, so a substantive spoken/typed answer
+    // (8+ words) counts as a correct recall and a very short one as a miss.
+    saveMasteryUpdates(
+      safeTranscript.map((entry) => ({
+        subject: entry.subjectName || 'General',
+        topic: entry.category || 'General',
+        isCorrect:
+          String(entry.studentText || '').trim().split(/\s+/).length >= 8 &&
+          entry.studentText !== 'Student response recorded.',
+      }))
+    )
   }
 
   const modeCards = [
@@ -3048,6 +3077,21 @@ export default function TestPage() {
             initialQuestionIndex={currentQuestionIndex}
             onComplete={handleVivaComplete}
           />
+        ) : null}
+
+        {sessionState === 'results' && masterySaveError ? (
+          <div
+            className="p-3 mb-3 rounded-4"
+            style={{
+              background: 'rgba(245, 158, 11, 0.12)',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              color: '#fcd34d',
+              fontSize: 14,
+            }}
+          >
+            <i className="bi bi-exclamation-triangle-fill me-2" />
+            {masterySaveError}
+          </div>
         ) : null}
 
         {resultsView}
