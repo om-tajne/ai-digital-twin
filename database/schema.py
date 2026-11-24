@@ -79,6 +79,62 @@ def _relax_legacy_columns(engine, Base):
     return relaxed
 
 
+def _merge_duplicate_mastery(engine):
+    """Merge duplicate student_mastery rows (same student + subject + topic, ignoring
+    case/whitespace and blank subject) so Top Struggles / planner don't list a topic twice."""
+    merged = 0
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text(
+                "SELECT mastery_id, student_id, subject, topic, correct_answers, "
+                "total_questions, mastery_score FROM student_mastery "
+                "ORDER BY created_at NULLS LAST"
+            )).mappings().all()
+
+            groups = {}
+            for r in rows:
+                subject = " ".join(str(r["subject"] or "").split()) or "General"
+                topic = " ".join(str(r["topic"] or "").split()) or "General"
+                key = (r["student_id"], subject.lower(), topic.lower())
+                groups.setdefault(key, []).append((r, subject, topic))
+
+            for items in groups.values():
+                if len(items) == 1:
+                    r, subject, topic = items[0]
+                    if subject != r["subject"] or topic != r["topic"]:
+                        conn.execute(
+                            text("UPDATE student_mastery SET subject=:s, topic=:t WHERE mastery_id=:id"),
+                            {"s": subject, "t": topic, "id": r["mastery_id"]},
+                        )
+                    continue
+
+                # keep the row with the most answers; fold the others into it
+                items.sort(key=lambda x: x[0]["total_questions"] or 0, reverse=True)
+                keeper, subject, topic = items[0]
+                total = sum(int(i[0]["total_questions"] or 0) for i in items)
+                correct = sum(int(i[0]["correct_answers"] or 0) for i in items)
+                conn.execute(
+                    text(
+                        "UPDATE student_mastery SET subject=:s, topic=:t, "
+                        "total_questions=:tq, correct_answers=:ca WHERE mastery_id=:id"
+                    ),
+                    {"s": subject, "t": topic, "tq": total, "ca": correct, "id": keeper["mastery_id"]},
+                )
+                for dup, _s, _t in items[1:]:
+                    conn.execute(
+                        text("UPDATE student_mastery_history SET mastery_id=:k WHERE mastery_id=:d"),
+                        {"k": keeper["mastery_id"], "d": dup["mastery_id"]},
+                    )
+                    conn.execute(
+                        text("DELETE FROM student_mastery WHERE mastery_id=:d"),
+                        {"d": dup["mastery_id"]},
+                    )
+                    merged += 1
+    except Exception as err:  # noqa: BLE001
+        logger.warning("Could not merge duplicate mastery rows: %s", str(err).splitlines()[0])
+    return merged
+
+
 def init_database(engine, Base):
     # 1. pgvector (needs a pgvector-enabled Postgres, e.g. the pgvector/pgvector Docker image)
     try:
@@ -98,6 +154,10 @@ def init_database(engine, Base):
     relaxed = _relax_legacy_columns(engine, Base)
     if relaxed:
         logger.info("Relaxed legacy NOT NULL columns: %s", ", ".join(relaxed))
+
+    merged = _merge_duplicate_mastery(engine)
+    if merged:
+        logger.info("Merged %d duplicate mastery rows", merged)
 
     # 4. vector index for fast RAG retrieval
     try:

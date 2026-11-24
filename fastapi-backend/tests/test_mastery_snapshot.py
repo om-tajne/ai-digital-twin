@@ -73,3 +73,25 @@ def test_mastery_update_creates_snapshot():
 
 if __name__ == "__main__":
     test_mastery_update_creates_snapshot()
+
+def test_mastery_update_reuses_row_ignoring_case_and_blank_subject():
+    import uuid
+    from database.session import SessionLocal
+    from database.models import Student, StudentMastery
+    from app.services.mastery_service import update_mastery_score
+
+    db = SessionLocal()
+    student = Student(email=f"m-{uuid.uuid4().hex[:8]}@example.com", full_name="M", password_hash="x")
+    db.add(student)
+    db.commit()
+    try:
+        update_mastery_score(db, student.student_id, "General", "Deadlocks", True)
+        update_mastery_score(db, student.student_id, "", "  deadlocks ", False)
+        update_mastery_score(db, student.student_id, "general", "DEADLOCKS", True)
+        rows = db.query(StudentMastery).filter(StudentMastery.student_id == student.student_id).all()
+        assert len(rows) == 1
+        assert rows[0].total_questions == 3 and rows[0].correct_answers == 2
+    finally:
+        db.delete(student)
+        db.commit()
+        db.close()

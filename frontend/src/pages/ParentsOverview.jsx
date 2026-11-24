@@ -194,7 +194,11 @@ export default function ParentsOverview() {
         if (err.name === "AbortError") return;
         console.error("Could not load student progress:", err);
         setDashData({ ...EMPTY_DASHBOARD, student: { ...(user?.student || user || {}), student_id: String(selectedStudentId), full_name: user?.full_name || user?.name || "Student", grade: user?.grade || "—", board: user?.board || "—" } });
-        setError(err.message || "Unable to load student progress.");
+        setError(
+          err.message === "Failed to fetch"
+            ? "Cannot reach the backend. Make sure the FastAPI server is running, then refresh."
+            : err.message || "Unable to load student progress."
+        );
       } finally {
         if (!controller.signal.aborted) setDashLoading(false);
       }
@@ -536,12 +540,12 @@ export default function ParentsOverview() {
               </p>
             ) : (
               <div className="heatmap-grid">
-                {filteredHeatmap.map((tile) => {
+                {filteredHeatmap.map((tile, tileIndex) => {
                   const score = toPercent(tile.score);
                   const color = tile.color || colorFromScore(score);
                   return (
                     <div
-                      key={`${tile.subject}-${tile.topic}`}
+                      key={`${tile.subject}-${tile.topic}-${tileIndex}`}
                       className="heatmap-tile"
                       role="button"
                       tabIndex={0}
@@ -640,10 +644,10 @@ export default function ParentsOverview() {
                             </tr>
                           </thead>
                           <tbody>
-                            {subj.topics?.map((topItem) => {
+                            {subj.topics?.map((topItem, topIndex) => {
                               const pct = toPercent(topItem.percentage);
                               return (
-                                <tr key={topItem.topic}>
+                                <tr key={`${topItem.topic}-${topIndex}`}>
                                   <td className="fw-semibold text-light">{topItem.topic}</td>
                                   <td>
                                     <div className="d-flex align-items-center gap-2">
@@ -739,9 +743,9 @@ export default function ParentsOverview() {
                     No weak areas detected.
                   </p>
                 )}
-                {struggles.map((st) => (
+                {struggles.map((st, stIndex) => (
                   <div
-                    key={`${st.subject}-${st.topic}`}
+                    key={`${st.subject}-${st.topic}-${stIndex}`}
                     className="struggle-row p-3 mb-2 rounded-3 bg-dark d-flex align-items-center justify-content-between"
                   >
                     <div>

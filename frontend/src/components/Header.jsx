@@ -178,7 +178,7 @@ const Header = () => {
                   <input
                     type="search"
                     className="form-control header-search-input"
-                    placeholder="Search pages & topics..."
+                    placeholder="Search..."
                     value={query}
                     autoComplete="off"
                     onChange={(e) => {

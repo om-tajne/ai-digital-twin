@@ -40,6 +40,7 @@ export default function Library() {
   const [sortMode, setSortMode] = useState('recent')
 
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [isUploading, setIsUploading] = useState(false)
 
   const [showUploadModal, setShowUploadModal] = useState(false)
@@ -65,6 +66,7 @@ export default function Library() {
 
     try {
       setLoading(true)
+      setLoadError('')
 
       const response = await fetch(
         `${API_BASE_URL}/documents/${user.student_id}`
@@ -91,6 +93,9 @@ export default function Library() {
       setDocuments(fetchedDocuments)
     } catch (error) {
       console.error('Failed to fetch documents:', error)
+      setLoadError(
+        'Could not load your library. Make sure the backend is running, then retry.'
+      )
     } finally {
       setLoading(false)
     }
@@ -617,6 +622,26 @@ export default function Library() {
               )}
 
             </div>
+
+            {loadError && !loading ? (
+              <div
+                className="p-3 mb-3 rounded-3 d-flex align-items-center justify-content-between gap-3"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#fca5a5',
+                  fontSize: 14,
+                }}
+              >
+                <span>
+                  <i className="bi bi-exclamation-triangle-fill me-2" />
+                  {loadError}
+                </span>
+                <Button size="sm" variant="outline-danger" onClick={fetchDocuments}>
+                  Retry
+                </Button>
+              </div>
+            ) : null}
 
             {loading ? (
               <div className="library-loading">

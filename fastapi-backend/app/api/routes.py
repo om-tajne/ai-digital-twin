@@ -12,6 +12,7 @@ from typing import List, Optional
 from starlette.concurrency import run_in_threadpool
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     HTTPException,
     File,
@@ -599,6 +600,7 @@ def trigger_embedding(
 
 @router.post("/upload-pdf")
 async def upload_pdf_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     student_id: Optional[str] = Form(None),
     subject: str = Form(...),
@@ -686,6 +688,12 @@ async def upload_pdf_file(
         raise HTTPException(
             status_code=400,
             detail="Uploaded file is empty.",
+        )
+
+    if not file_bytes.lstrip()[:5] == b"%PDF-":
+        raise HTTPException(
+            status_code=400,
+            detail="This file is not a valid PDF (it may be corrupted or renamed from another format).",
         )
 
     # --------------------------------------------------------
@@ -794,6 +802,14 @@ async def upload_pdf_file(
                 f"{error}"
             ),
         )
+
+    # Pre-generate a question pool in the background so the first quiz is instant
+    if doc_id:
+        try:
+            from app.services.question_pool_service import prewarm_document_pool
+            background_tasks.add_task(prewarm_document_pool, str(doc_id), str(student_uuid))
+        except Exception as warm_err:
+            logger.warning(f"Could not schedule question pre-warm: {warm_err}")
 
     # --------------------------------------------------------
     # 9. Return response
@@ -2295,6 +2311,17 @@ def generate_test(
     llm = get_llm_service()
 
     context_parts: List[str] = []
+    topic_fallback: Optional[List[dict]] = None
+
+    def _fallback_response():
+        return {
+            "success": True,
+            "student_id": str(student_uuid),
+            "topic": req.topic,
+            "num_questions": req.num_questions,
+            "document_ids": [],
+            "questions": topic_fallback,
+        }
 
     # ========================================================
     # DOCUMENT IDS
@@ -2428,6 +2455,28 @@ def generate_test(
 
     elif req.topic:
 
+        # FAST PATH: matching cached / curated questions for this exact topic.
+        # A full set (>=5, or the number asked for) is served instantly; a smaller
+        # set is kept as a fallback in case generating from the notes fails.
+        try:
+            from app.services.question_pool_service import sample_questions_for_topic
+            fast_topic = sample_questions_for_topic(
+                str(student_uuid), req.topic, req.num_questions
+            )
+            if fast_topic and len(fast_topic) >= min(5, req.num_questions):
+                logger.info(f"Serving {len(fast_topic)} instant questions for topic '{req.topic}'.")
+                return {
+                    "success": True,
+                    "student_id": str(student_uuid),
+                    "topic": req.topic,
+                    "num_questions": req.num_questions,
+                    "document_ids": [],
+                    "questions": fast_topic,
+                }
+            topic_fallback = fast_topic or None
+        except Exception as topic_pool_err:
+            logger.warning(f"Topic pool lookup skipped: {topic_pool_err}")
+
         try:
             chunks = retrieve_relevant_chunks(
                 db=db,
@@ -2451,6 +2500,9 @@ def generate_test(
                 ),
                 exc_info=True,
             )
+
+            if topic_fallback:
+                return _fallback_response()
 
             raise HTTPException(
                 status_code=500,
@@ -2505,6 +2557,9 @@ def generate_test(
     ).strip()
 
     if not context:
+        if topic_fallback:
+            return _fallback_response()
+
         raise HTTPException(
             status_code=404,
             detail=(
@@ -2532,6 +2587,9 @@ def generate_test(
             "Test question generation failed"
         )
 
+        if topic_fallback:
+            return _fallback_response()
+
         raise HTTPException(
             status_code=502,
             detail=(
@@ -2540,6 +2598,9 @@ def generate_test(
         ) from exc
 
     if not questions:
+        if topic_fallback:
+            return _fallback_response()
+
         raise HTTPException(
             status_code=502,
             detail=(
@@ -2563,6 +2624,9 @@ def generate_test(
                 g_hash = hashlib.md5(req.guidelines.strip().lower().encode("utf-8")).hexdigest()[:12]
                 doc_str = "-".join(sorted(str(d.document_id) for d in documents))
                 save_cached_pool(f"quiz_pool:guidelines:{doc_str}:{g_hash}", questions)
+        elif req.topic and not document_ids:
+            from app.services.question_pool_service import save_topic_pool
+            save_topic_pool(str(student_uuid), req.topic, questions)
     except Exception as save_err:
         logger.warning(f"Failed to cache generated questions: {save_err}")
 

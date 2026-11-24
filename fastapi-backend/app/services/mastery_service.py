@@ -1,5 +1,6 @@
 import os
 import redis
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database.models import StudentMastery, MasterySnapshot
 
@@ -45,14 +46,20 @@ def update_mastery_score(
     question performance.
     """
 
-    # Find existing mastery record
+    # Normalise names so "Dynamic Programming", "dynamic programming " and a
+    # blank subject all map to ONE row instead of creating duplicates.
+    subject = " ".join(str(subject or "").split()) or "General"
+    topic = " ".join(str(topic or "").split()) or "General"
+
+    # Find existing mastery record (case-insensitive, oldest first)
     mastery = (
         db.query(StudentMastery)
         .filter(
             StudentMastery.student_id == student_id,
-            StudentMastery.subject == subject,
-            StudentMastery.topic == topic
+            func.lower(func.trim(StudentMastery.subject)) == subject.lower(),
+            func.lower(func.trim(StudentMastery.topic)) == topic.lower()
         )
+        .order_by(StudentMastery.created_at)
         .first()
     )
 

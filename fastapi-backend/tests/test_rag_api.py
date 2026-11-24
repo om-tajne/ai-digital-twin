@@ -105,7 +105,7 @@ def test_upload_pdf(mock_delay, student, tmp_path):
     
     # Create a dummy PDF file
     pdf_path = tmp_path / "test.pdf"
-    pdf_path.write_text("dummy pdf content")
+    pdf_path.write_text("%PDF-1.4 dummy pdf content")
     
     with open(pdf_path, "rb") as f:
         response = client.post(
@@ -121,7 +121,7 @@ def test_upload_pdf(mock_delay, student, tmp_path):
 
 def test_upload_pdf_duplicate_returns_409(student, document, tmp_path):
     pdf_path = tmp_path / "test_doc.pdf"
-    pdf_path.write_text("dummy pdf content")
+    pdf_path.write_text("%PDF-1.4 dummy pdf content")
     
     with open(pdf_path, "rb") as f:
         response = client.post(
@@ -150,3 +150,25 @@ def test_delete_document(student, document):
     # Verify deletion
     response2 = client.get(f"{API}/documents/{student}")
     assert len(response2.json()["documents"]) == 0
+
+
+def test_pool_matching_uses_whole_words_and_topic_fast_path():
+    from app.services.question_pool_service import (
+        _normalize_key,
+        get_curated_pool_for_subject_or_file,
+        sample_questions_for_topic,
+    )
+
+    # Notes that merely contain "system"/"os"/"ai" must NOT get the OS / CS banks
+    for name in ["Expert Systems.pdf", "Cryptography and Network Security", "Photosynthesis", "Main Topics", ""]:
+        assert get_curated_pool_for_subject_or_file(name) == [], name
+
+    assert _normalize_key("Operating Systems Notes.pdf") == "os"
+    assert _normalize_key("DAA Unit 3.pdf") == "daa"
+
+    # Targeted practice resolves instantly from curated banks, on topic only
+    qs = sample_questions_for_topic("student-x", "Deadlocks", 10)
+    assert qs and all("deadlock" in q["topic"].lower() for q in qs)
+    big = sample_questions_for_topic("student-x", "CPU Scheduling", 10) or []
+    assert all("scheduling" in q["topic"].lower() for q in big)
+    assert sample_questions_for_topic("student-x", "Quantum Gravity Of Cats", 10) is None

@@ -8,6 +8,7 @@ Provides sub-50ms test question generation by leveraging:
 """
 
 import json
+import re
 import logging
 import random
 import hashlib
@@ -833,21 +834,26 @@ CURATED_QUESTION_BANKS: Dict[str, List[Dict[str, Any]]] = {
 
 
 def _normalize_key(text: Optional[str]) -> str:
-    """Normalize subject or filename to match pool keys."""
+    """Normalize subject or filename to match pool keys.
+
+    Uses whole-word matching: the old substring checks sent any notes with
+    "system" in the name (e.g. "Expert Systems") to the Operating Systems bank.
+    """
     if not text:
         return ""
     t = text.lower().strip()
     # Strip extensions
     if t.endswith(".pdf"):
         t = t[:-4].strip()
-    # Normalize aliases
-    if any(k in t for k in ["daa", "algorithm", "algo", "knapsack", "greedy", "unit-3", "unit 3"]):
+    # Normalize aliases (whole words / phrases only)
+    if re.search(r"\b(daa|algorithms?|algo|knapsack|greedy)\b|unit[- ]3", t) \
+            and not re.search(r"\bmachine learning\b", t):
         return "daa"
-    if any(k in t for k in ["operating", "os", "kernel", "system-", "system"]):
+    if re.search(r"\bos\b|\boperating systems?\b|\bkernel\b", t):
         return "os"
-    if any(k in t for k in ["physics", "physic", "mechanics"]):
+    if re.search(r"\bphysics\b|\bmechanics\b", t):
         return "physics"
-    if any(k in t for k in ["computer science", "sample", "cs", "ai", "machine learning", "data structure"]):
+    if re.search(r"\bcomputer science\b|\bsample\b|\bcs\b", t):
         return "computer science"
     return t
 
@@ -855,13 +861,97 @@ def _normalize_key(text: Optional[str]) -> str:
 def get_curated_pool_for_subject_or_file(name: str) -> List[Dict[str, Any]]:
     """Retrieve pre-warmed curated questions for a document or subject name."""
     norm = _normalize_key(name)
-    if norm in CURATED_QUESTION_BANKS:
+    if norm and norm in CURATED_QUESTION_BANKS:
         return CURATED_QUESTION_BANKS[norm]
-    # Check partial containment
-    for k, questions in CURATED_QUESTION_BANKS.items():
-        if k in norm or norm in k:
-            return questions
     return []
+
+
+def _topic_norm(topic: Optional[str]) -> str:
+    words = re.sub(r"[^a-z0-9 ]+", " ", (topic or "").lower()).split()
+    # crude plural folding so "Deadlocks" matches "Deadlock Avoidance"
+    return " ".join(w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words)
+
+
+def sample_questions_for_topic(
+    student_id: str,
+    topic: str,
+    num_questions: int = 10,
+    min_questions: int = 1,
+) -> Optional[List[Dict[str, Any]]]:
+    """Instant targeted practice: questions whose topic matches `topic`, taken from the
+    student's cached topic pool or the curated banks. None if too few to be useful."""
+    tn = _topic_norm(topic)
+    if not tn:
+        return None
+
+    cached = get_cached_pool(f"quiz_pool:topic:{student_id}:{tn}")
+    if len(cached) >= min_questions:
+        pool = list(cached)
+    else:
+        pool = []
+        seen = set()
+        for bank in CURATED_QUESTION_BANKS.values():
+            for q in bank:
+                qt = _topic_norm(q.get("topic"))
+                text = (q.get("question_text") or "").strip().lower()
+                if not qt or text in seen:
+                    continue
+                if qt == tn or tn in qt or qt in tn:
+                    seen.add(text)
+                    pool.append(q)
+
+    if len(pool) < min_questions:
+        return None
+
+    random.shuffle(pool)
+    return pool[:num_questions]
+
+
+def save_topic_pool(student_id: str, topic: str, questions: List[Dict[str, Any]]):
+    tn = _topic_norm(topic)
+    if tn:
+        save_cached_pool(f"quiz_pool:topic:{student_id}:{tn}", questions)
+
+
+def prewarm_document_pool(document_id: str, student_id: str, num_questions: int = 10):
+    """Background job run after a PDF upload: generate and cache a question pool so the
+    student's FIRST quiz on these notes starts instantly instead of waiting for the LLM."""
+    try:
+        if get_cached_pool(f"quiz_pool:doc:{document_id}"):
+            return
+
+        from database.session import SessionLocal
+        from database.models import Document, KnowledgeChunk
+        from app.services.llm_service import get_llm_service
+
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.document_id == document_id).first()
+            if not doc:
+                return
+            # Curated banks already serve this subject instantly
+            if get_curated_pool_for_subject_or_file(doc.filename or "") or \
+                    get_curated_pool_for_subject_or_file(doc.subject or ""):
+                return
+
+            chunks = (
+                db.query(KnowledgeChunk)
+                .filter(KnowledgeChunk.document_id == doc.document_id)
+                .limit(6)
+                .all()
+            )
+            context = " ".join(c.text_content for c in chunks if c.text_content).strip()
+            if not context:
+                return
+
+            questions = get_llm_service().generate_test_questions(context, num_questions)
+            if questions:
+                save_cached_pool(f"quiz_pool:doc:{document_id}", questions)
+                logger.info(f"Pre-warmed {len(questions)} questions for document {document_id}")
+        finally:
+            db.close()
+    except Exception as err:  # noqa: BLE001
+        logger.warning(f"Question pool pre-warm skipped for {document_id}: {err}")
 
 
 def get_cached_pool(key: str) -> List[Dict[str, Any]]:
@@ -1012,51 +1102,3 @@ def sample_questions_for_documents(
         return selected_questions[:num_questions]
 
     return None
-
-
-def sample_questions_for_topic(
-    topic: Optional[str] = None,
-    num_questions: int = 10,
-    guidelines: Optional[str] = None,
-) -> Optional[List[Dict[str, Any]]]:
-    """
-    Attempt to fulfill topic-based question generation instantaneously
-    from pre-computed pools or Redis cache.
-    """
-    if guidelines and guidelines.strip():
-        g_hash = hashlib.md5(guidelines.strip().lower().encode("utf-8")).hexdigest()[:12]
-        cache_key = f"quiz_pool:topic_guidelines:{_normalize_key(topic or 'all')}:{g_hash}"
-        cached = get_cached_pool(cache_key)
-        if cached and len(cached) >= num_questions:
-            shuffled = list(cached)
-            random.shuffle(shuffled)
-            return shuffled[:num_questions]
-        return None
-
-    if topic and topic.strip():
-        norm = _normalize_key(topic)
-        pool = get_cached_pool(f"quiz_pool:subject:{norm}")
-        if not pool:
-            pool = get_curated_pool_for_subject_or_file(topic)
-        if pool:
-            p_copy = list(pool)
-            random.shuffle(p_copy)
-            return p_copy[:num_questions]
-
-    # If general study material or no specific topic, sample across all subjects
-    all_pools = list(CURATED_QUESTION_BANKS.values())
-    combined = []
-    seen = set()
-    for p in all_pools:
-        for q in p:
-            q_text = q.get("question_text", "").strip().lower()
-            if q_text not in seen:
-                seen.add(q_text)
-                combined.append(q)
-
-    if combined:
-        random.shuffle(combined)
-        return combined[:num_questions]
-
-    return None
-
