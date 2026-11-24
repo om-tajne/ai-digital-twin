@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useContext } from 'react'
+import { useEffect, useMemo, useRef, useState, useContext } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AuthContext } from '../context/AuthContext'
 import {
@@ -845,18 +845,21 @@ function ResultsShell({
 export default function TestPage() {
   const { user } =
     useContext(AuthContext)
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  useEffect(() => {
-    const queryTopic = searchParams.get('topic')
-    const querySubject = searchParams.get('subject')
-    if (queryTopic) {
-      setCustomGuidelines(
-        `Targeted Practice: Focus specifically on mastering ${queryTopic} (${querySubject || 'Core Concepts'}) questions and identifying gaps.`
-      )
-      setMode('quiz')
-    }
-  }, [searchParams])
+  // Targeted practice: arriving with ?topic=... (from Top Struggles / Study
+  // Planner) skips the setup screen and quizzes on that topic only.
+  const targetTopic = (searchParams.get('topic') || '').trim()
+  const rawTargetSubject = (searchParams.get('subject') || '').trim()
+  const targetSubject =
+    rawTargetSubject && rawTargetSubject.toLowerCase() !== 'general'
+      ? rawTargetSubject
+      : ''
+  const [targetStatus, setTargetStatus] = useState(
+    targetTopic ? 'loading' : 'idle'
+  )
+  const [targetError, setTargetError] = useState('')
+  const targetRunKey = useRef('')
 
   const [sessionState, setSessionState] =
     useState('setup')
@@ -1210,7 +1213,120 @@ export default function TestPage() {
     }
   }
 
+  const startTargetedPractice = async () => {
+    const studentId = user?.student_id || user?.id
+
+    if (!studentId) {
+      setTargetError('Please log in before starting practice.')
+      setTargetStatus('error')
+      return
+    }
+
+    setTargetStatus('loading')
+    setTargetError('')
+
+    const label = targetSubject
+      ? `${targetTopic} (${targetSubject})`
+      : targetTopic
+
+    try {
+      // No document_ids on purpose: the backend then retrieves the chunks
+      // most relevant to this topic from ALL of the student's notes.
+      const response = await fetch(`${API_URL}/api/v1/tests/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          student_id: studentId,
+          topic: targetTopic,
+          num_questions: questionCount,
+          guidelines:
+            `Targeted practice on "${label}". Every question MUST be about ${targetTopic} only - ` +
+            `do not ask about any other topic. Mix conceptual and application questions to expose gaps.`,
+        }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            data?.message ||
+            `Practice generation failed: ${response.status}`
+        )
+      }
+
+      const generated = normalizeGeneratedQuestions(data?.questions)
+        .filter(
+          (question) =>
+            Array.isArray(question.options) && question.options.length >= 2
+        )
+        // Tag with the topic being practised so mastery updates the right row
+        .map((question) => ({
+          ...question,
+          category: targetTopic,
+          subjectName: targetSubject || question.subjectName || 'General',
+        }))
+
+      if (!generated.length) {
+        throw new Error(
+          `No questions could be generated for "${targetTopic}". Make sure your notes for it have finished processing.`
+        )
+      }
+
+      setQuestions(generated.slice(0, questionCount))
+      setAnswers({})
+      setCurrentQuestionIndex(0)
+      setTranscript([])
+      setMicState('idle')
+      setQuizResults(null)
+      setMasteryResult(null)
+      setVivaResults(null)
+      setExpandedRows({})
+      setMode('quiz')
+      setSessionStartedAt(Date.now())
+      setSessionCompletedAt(null)
+      setSessionState('quiz')
+      setTargetStatus('idle')
+    } catch (error) {
+      console.error('Targeted practice failed:', error)
+      setTargetError(
+        error?.message === 'Failed to fetch'
+          ? `Cannot reach the backend at ${API_URL}. Make sure the FastAPI server is running.`
+          : error?.message || 'Unable to generate practice questions.'
+      )
+      setTargetStatus('error')
+    }
+  }
+
+  useEffect(() => {
+    if (!targetTopic) {
+      setTargetStatus('idle')
+      return
+    }
+
+    const studentId = user?.student_id || user?.id
+    if (!studentId) return
+
+    const runKey = `${studentId}|${targetTopic}|${targetSubject}`
+    if (targetRunKey.current === runKey) return
+    targetRunKey.current = runKey
+
+    startTargetedPractice()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetTopic, targetSubject, user?.student_id, user?.id])
+
+  const leaveTargetedPractice = () => {
+    targetRunKey.current = ''
+    setTargetStatus('idle')
+    setTargetError('')
+    setSearchParams({}, { replace: true })
+    resetToSetup()
+  }
+
   const resetToSetup = () => {
+    targetRunKey.current = ''
+    setTargetStatus('idle')
+    setSearchParams({}, { replace: true })
     setSessionState('setup')
     setMode(null)
     setSelectedSubjects([])
@@ -2839,8 +2955,56 @@ export default function TestPage() {
       </style>
 
       <div className="page-frame">
-        {sessionState ===
-        'setup' ? (
+        {sessionState === 'setup' && targetTopic && targetStatus !== 'idle' ? (
+          <div
+            className="hero-shell p-4 p-xl-5 mb-4 text-center"
+            style={{ maxWidth: 640, margin: '40px auto' }}
+          >
+            <div
+              className="text-uppercase small mb-2"
+              style={{ letterSpacing: '0.16em', color: '#8a94a6' }}
+            >
+              Targeted Practice
+            </div>
+            <h2 className="fw-semibold mb-3" style={{ color: '#f8fafc', fontSize: 28 }}>
+              {targetTopic}
+              {targetSubject ? (
+                <span style={{ color: '#94a3b8', fontSize: 16 }}> · {targetSubject}</span>
+              ) : null}
+            </h2>
+
+            {targetStatus === 'loading' ? (
+              <>
+                <Spinner animation="border" style={{ color: '#38bdf8' }} />
+                <p className="mt-3 mb-0" style={{ color: '#94a3b8' }}>
+                  Preparing questions on {targetTopic} from your notes...
+                </p>
+              </>
+            ) : (
+              <>
+                <div
+                  className="p-3 mb-3 rounded-4 text-start"
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: '#fca5a5',
+                    fontSize: 14,
+                  }}
+                >
+                  {targetError}
+                </div>
+                <div className="d-flex gap-2 justify-content-center flex-wrap">
+                  <Button onClick={startTargetedPractice}>Try again</Button>
+                  <Button variant="outline-light" onClick={leaveTargetedPractice}>
+                    Choose notes manually
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
+
+        {sessionState === 'setup' && !(targetTopic && targetStatus !== 'idle') ? (
           <div className="hero-shell p-4 p-xl-5 mb-4 d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 gap-lg-4">
             <div>
               <div
@@ -2869,8 +3033,7 @@ export default function TestPage() {
           </div>
         ) : null}
 
-        {sessionState ===
-        'setup'
+        {sessionState === 'setup' && !(targetTopic && targetStatus !== 'idle')
           ? setupView
           : null}
 
